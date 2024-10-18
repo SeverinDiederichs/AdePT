@@ -27,6 +27,7 @@ else()
 endif()
 
 set(sources_g4
+  src/Run.cc
   src/ActionInitialisation.cc
   src/DetectorConstruction.cc
   src/DetectorMessenger.cc
@@ -75,7 +76,7 @@ set_target_properties(AdePTAsyncTransport PROPERTIES
 
 option(AsyncTransport "Link to AdePTAsyncTransport" ON)
 
-find_package(ROOT REQUIRED COMPONENTS Hist RIO)
+# find_package(ROOT REQUIRED COMPONENTS Hist RIO)
 
 add_executable(AsyncExample
     example.cpp
@@ -88,9 +89,6 @@ target_link_libraries(AsyncExample
   PRIVATE
     ExamplesCommon
     NVTX
-    ROOT::Core
-    ROOT::Hist
-    ROOT::RIO
 )
 
 if(AsyncTransport)
