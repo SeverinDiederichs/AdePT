@@ -25,13 +25,20 @@
 // ********************************************************************
 //
 #include "RunAction.hh"
+#include "Run.hh"
+#include "G4Run.hh"
 #include "G4Threading.hh"
-//#include "Histograms.h"
+#include <AdePT/benchmarking/TestManager.h>
 
 #include <thread>
 #include <mutex>
 
-RunAction::RunAction() : G4UserRunAction() {}
+RunAction::RunAction() : G4UserRunAction(), fOutputDirectory(""), fOutputFilename("") {}
+
+RunAction::RunAction(G4String aOutputDirectory, G4String aOutputFilename, bool aDoBenchmark, bool aDoValidation)
+    : G4UserRunAction(), fOutputDirectory(aOutputDirectory), fOutputFilename(aOutputFilename)
+{
+}
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
@@ -42,6 +49,10 @@ RunAction::~RunAction() {}
 void RunAction::BeginOfRunAction(const G4Run *)
 {
   fTimer.Start();
+  auto tid = G4Threading::G4GetThreadId();
+  if (tid < 0) {
+    fRun->GetTestManager()->timerStart(Run::timers::TOTAL);
+  }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -52,10 +63,17 @@ void RunAction::EndOfRunAction(const G4Run *)
   auto time = fTimer.Stop();
   auto tid  = G4Threading::G4GetThreadId();
   // Just protect the printout to avoid interlacing text
-  const std::scoped_lock<std::mutex> lock(print_mutex);
+  const std::lock_guard<std::mutex> lock(print_mutex);
   // Print timer just for the master thread since this is called when all workers are done
   if (tid < 0) {
     G4cout << "Run time: " << time << "\n";
-    // AsyncExHistos::HistoWriter::GetInstance().WriteHistos();
+    fRun->GetTestManager()->timerStop(Run::timers::TOTAL);
+    fRun->EndOfRunSummary(fOutputDirectory, fOutputFilename);
   }
+}
+
+G4Run *RunAction::GenerateRun()
+{
+  fRun = new Run();
+  return fRun;
 }

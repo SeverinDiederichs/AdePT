@@ -42,6 +42,12 @@ int main(int argc, char **argv)
     } else if (argument == "-m") {
       batchMacroName = G4String(argv[i + 1]);
       ++i;
+    } else if (argument == "--output_dir") {
+      outputDirectory = G4String(argv[i + 1]);
+      ++i;
+    } else if (argument == "--output_file") {
+      outputFilename = G4String(argv[i + 1]);
+      ++i;
     } else if (argument == "--no-adept") {
       AdePT = false;
     } else if (argument == "--output") {

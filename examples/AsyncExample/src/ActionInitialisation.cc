@@ -31,8 +31,12 @@
 #include "RunAction.hh"
 #include "TrackingAction.hh"
 #include "SteppingAction.hh"
+#include <AdePT/benchmarking/TestManager.h>
 
-ActionInitialisation::ActionInitialisation() : G4VUserActionInitialization() {}
+ActionInitialisation::ActionInitialisation(G4String aOutputDirectory, G4String aOutputFilename)
+    : G4VUserActionInitialization(), fOutputDirectory(aOutputDirectory), fOutputFilename(aOutputFilename)
+{
+}
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
@@ -42,7 +46,8 @@ ActionInitialisation::~ActionInitialisation() {}
 
 void ActionInitialisation::BuildForMaster() const
 {
-  SetUserAction(new RunAction());
+  new PrimaryGeneratorAction();
+  SetUserAction(new RunAction(fOutputDirectory, fOutputFilename));
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -51,9 +56,11 @@ void ActionInitialisation::Build() const
 {
   SetUserAction(new PrimaryGeneratorAction());
   SetUserAction(new EventAction());
-  SetUserAction(new RunAction());
+  RunAction *aRunAction = new RunAction(fOutputDirectory, fOutputFilename);
+  SetUserAction(aRunAction);
   TrackingAction *aTrackingAction = new TrackingAction();
   SetUserAction(aTrackingAction);
-  SteppingAction *aSteppingAction = new SteppingAction(1000);
+  SteppingAction *aSteppingAction = new SteppingAction();
   SetUserAction(aSteppingAction);
+  aTrackingAction->setSteppingAction(aSteppingAction);
 }
