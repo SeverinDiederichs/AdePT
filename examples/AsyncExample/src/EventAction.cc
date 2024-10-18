@@ -36,7 +36,7 @@
 #include "G4EventManager.hh"
 #include "G4SystemOfUnits.hh"
 
-#include <TProfile.h>
+// #include <TProfile.h>
 
 #include <mutex>
 #include <sstream>
@@ -110,15 +110,6 @@ void EventAction::EndOfEventAction(const G4Event *aEvent)
     static std::mutex eventActionPrinterMutex;
     std::scoped_lock lock{eventActionPrinterMutex};
     std::cout << "\n" << msg.str() << "\n";
-  }
-
-  auto totalE = std::make_shared<TH1D>("TotalE", "Total Energy deposition per event;E / GeV", 200, 0, 5000);
-  totalE->Fill(totalEnergy / GeV);
-  auto energyPerLVol = std::make_shared<TProfile>(("Event_" + std::to_string(eventId) + "_energyPerLVol").c_str(),
-                                                  "Total Energy deposited per Volume;Volume name;E / GeV",
-                                                  energyPerLogicalVolume.size(), 0, energyPerLogicalVolume.size(), "s");
-  for (const auto &[name, energy] : energyPerLogicalVolume) {
-    energyPerLVol->Fill(name.c_str(), energy);
   }
 
   // AsyncExHistos::registerHisto(totalE);

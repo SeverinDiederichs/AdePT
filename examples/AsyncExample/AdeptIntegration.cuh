@@ -82,7 +82,7 @@ struct GammaInteractions {
     double geometryStepLength;
     double PEmxSec; // Only used for photoelectric process
     unsigned int slot;
-    vecgeom::NavStateIndex preStepNavState;
+    vecgeom::NavigationState preStepNavState;
     vecgeom::Vector3D<Precision> preStepPos;
     vecgeom::Vector3D<Precision> preStepDir;
     double preStepEnergy;

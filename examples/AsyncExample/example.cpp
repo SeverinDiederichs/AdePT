@@ -29,6 +29,8 @@ int main(int argc, char **argv)
 {
   // Macro name from arguments
   G4String batchMacroName;
+  G4String outputDirectory  = "";
+  G4String outputFilename   = "";
   G4String helpMsg("Usage: " + G4String(argv[0]) +
                    " [option(s)] \n No additional arguments triggers an interactive mode "
                    "executing vis.mac macro. \n Options:\n\t-h\t\tdisplay this help "
@@ -90,7 +92,7 @@ int main(int argc, char **argv)
   //-------------------------------
   // UserAction classes
   //-------------------------------
-  runManager->SetUserInitialization(new ActionInitialisation());
+  runManager->SetUserInitialization(new ActionInitialisation(outputDirectory, outputFilename));
 
   G4UImanager *UImanager = G4UImanager::GetUIpointer();
   G4String command       = "/control/execute ";
