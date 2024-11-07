@@ -58,14 +58,14 @@ static __device__ __forceinline__ void TransportElectrons(Track *electrons, cons
   constexpr Precision kPushOutRegion = 10 * vecgeom::kTolerance;
   constexpr int Charge               = IsElectron ? -1 : 1;
   constexpr double restMass          = copcore::units::kElectronMassC2;
-  constexpr unsigned short maxSteps  = 20'000;
+  constexpr unsigned short maxSteps  = 10000; // 20'000;
   fieldPropagatorConstBz fieldPropagatorBz(BzFieldValue);
 
   const int activeSize = active->size();
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < activeSize; i += blockDim.x * gridDim.x) {
     const int slot      = (*active)[i];
     Track &currentTrack = electrons[slot];
-    currentTrack.stepCounter++;
+    currentTrack.stepCounter++; // step counter is already increased below when checking for maxSteps
     auto eKin                = currentTrack.energy;
     const auto preStepEnergy = eKin;
     auto pos            = currentTrack.pos;
@@ -104,7 +104,7 @@ static __device__ __forceinline__ void TransportElectrons(Track *electrons, cons
       // continue;
     }
 
-    if (++currentTrack.stepCounter >= maxSteps) {
+    if (currentTrack.stepCounter >= maxSteps) {
       printf("Killing e-/+ event %d E=%f vol=%d lvol=%d after %d steps.\n", currentTrack.eventId, eKin, volume->id(),
              lvolID, currentTrack.stepCounter);
       continue;
@@ -193,7 +193,7 @@ static __device__ __forceinline__ void TransportElectrons(Track *electrons, cons
     vecgeom::NavStateIndex nextState;
     if (BzFieldValue != 0) {
       geometryStepLength = fieldPropagatorBz.ComputeStepAndNextVolume<BVHNavigator>(
-          eKin, restMass, Charge, geometricalStepLengthFromPhysics, pos, dir, navState, nextState, propagated, safety);
+          eKin, restMass, Charge, geometricalStepLengthFromPhysics, pos, dir, navState, nextState, propagated, safety, /*max_i_in_stepper=*/10);
     } else {
       geometryStepLength = BVHNavigator::ComputeStepAndNextVolume(pos, dir, geometricalStepLengthFromPhysics, navState,
                                                                   nextState, kPush);
@@ -323,7 +323,7 @@ static __device__ __forceinline__ void TransportElectrons(Track *electrons, cons
                eKin, currentTrack.eventId, currentTrack.looperCounter, energyDeposit, geometryStepLength,
                geometricalStepLengthFromPhysics, safety);
         atomicAdd(&userScoring[currentTrack.threadId].fGlobalCounters.numKilled, 1);
-        survive(/*leak=*/true);
+        // survive(/*leak=*/true); // don't send particles back at this point, G4 seems to be struggling a lot with those tracks too!
         continue;
       } else if (nextState.Top() != nullptr) {
         // Go to next volume
@@ -360,7 +360,8 @@ static __device__ __forceinline__ void TransportElectrons(Track *electrons, cons
                eKin, currentTrack.eventId, currentTrack.looperCounter, energyDeposit, geometryStepLength,
                geometricalStepLengthFromPhysics, safety);
         atomicAdd(&userScoring[currentTrack.threadId].fGlobalCounters.numKilled, 1);
-        survive(/*leak=*/true);
+        // survive(/*leak=*/true);  // don't send particles back at this point, G4 seems to be struggling a lot with those tracks too!
+
       } else {
         survive();
       }
