@@ -28,11 +28,11 @@
 #ifndef SENSITIVEDETECTOR_HH
 #define SENSITIVEDETECTOR_HH
 
-#include <unordered_map>
 #include "SimpleHit.hh"
 
 #include "G4VSensitiveDetector.hh"
 
+#include <unordered_map>
 #include <set>
 
 class G4HCofThisEvent;
