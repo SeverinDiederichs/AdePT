@@ -9,6 +9,8 @@
 #include <AdePT/core/HostScoringImpl.cuh>
 
 #include <AdePT/core/AdePTTransportStruct.cuh>
+#include <AdePT/magneticfield/GeneralMagneticField.h>
+
 #include <AdePT/base/Atomic.h>
 #include <AdePT/navigation/AdePTNavigator.h>
 #include <AdePT/base/MParray.h>
@@ -225,6 +227,16 @@ bool InitializeField(double bz)
   return true;
 }
 
+bool InitializeGeneralField(GeneralMagneticField& magneticField) {
+  // Create a view on the device
+  auto d_fieldView = magneticField.GetGlobalView();
+  if (!d_fieldView) {
+    std::cerr << "Failed to create GPU view of magnetic field.\n";
+    return false;
+  }
+  COPCORE_CUDA_CHECK(cudaMemcpyToSymbol(MagneticFieldView, &d_fieldView, sizeof(d_fieldView)));
+  return true;
+}
 void PrepareLeakedBuffers(int numLeaked, adeptint::TrackBuffer &buffer, GPUstate &gpuState)
 {
   // Make sure the size of the allocated track array is large enough

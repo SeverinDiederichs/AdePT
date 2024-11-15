@@ -25,6 +25,7 @@ namespace adept_impl {
 /// Forward declarations for methods implemented in AdePTTransport.cu
 using TrackBuffer = adeptint::TrackBuffer;
 bool InitializeField(double);
+bool InitializeGeneralField(GeneralMagneticField&);
 bool InitializeVolAuxArray(adeptint::VolAuxArray &);
 void FreeVolAuxArray(adeptint::VolAuxArray &);
 G4HepEmState *InitG4HepEm();
@@ -58,6 +59,20 @@ template <typename IntegrationLayer>
 bool AdePTTransport<IntegrationLayer>::InitializeField(double bz)
 {
   return adept_impl::InitializeField(bz);
+}
+
+template <typename IntegrationLayer>
+bool AdePTTransport<IntegrationLayer>::InitializeGeneralField() {
+  if (!fBfieldFile.empty()) {
+    // Initialize magnetic field data from file
+    if (!fMagneticField.InitializeFromFile(fBfieldFile)) {
+      return false;
+    }
+    
+    // Delegate the setup of the global view pointer to adept_impl
+    return adept_impl::InitializeGeneralField(fMagneticField);
+  }
+  return false;
 }
 
 template <typename IntegrationLayer>
@@ -155,6 +170,10 @@ void AdePTTransport<IntegrationLayer>::Initialize(bool common_data)
     double bz = fIntegrationLayer.GetUniformFieldZ();
     if (!InitializeField(bz))
       throw std::runtime_error("AdePTTransport<IntegrationLayer>::Initialize cannot initialize field on GPU");
+
+    // initialize general field
+    if (!InitializeGeneralField())
+      throw std::runtime_error("AdePTTransport<IntegrationLayer>::Initialize failed to initialize general field on GPU");
 
     // Do the material-cut couple index mapping once
     // as well as set flags for sensitive volumes and region

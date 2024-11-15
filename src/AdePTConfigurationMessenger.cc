@@ -56,6 +56,9 @@ AdePTConfigurationMessenger::AdePTConfigurationMessenger(AdePTConfiguration *ade
   fSetGDMLCmd = new G4UIcmdWithAString("/adept/setVecGeomGDML", this);
   fSetGDMLCmd->SetGuidance("Temporary method for setting the geometry to use with VecGeom");
 
+  fSetCovfieFileCmd = new G4UIcmdWithAString("/adept/setCovfieBfieldFile", this);
+  fSetCovfieFileCmd->SetGuidance("Set the path the the covfie file for reading in an external magnetic field");
+
   fSetCUDAStackLimitCmd = new G4UIcmdWithAnInteger("/adept/setCUDAStackLimit", this);
   fSetCUDAStackLimitCmd->SetGuidance("Set the CUDA device stack limit");
 }
@@ -74,6 +77,9 @@ AdePTConfigurationMessenger::~AdePTConfigurationMessenger()
   delete fSetMillionsOfTrackSlotsCmd;
   delete fSetMillionsOfHitSlotsCmd;
   delete fSetHitBufferFlushThresholdCmd;
+  delete fSetGDMLCmd;
+  delete fSetCovfieFileCmd;
+  delete fSetCUDAStackLimitCmd;
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -99,6 +105,8 @@ void AdePTConfigurationMessenger::SetNewValue(G4UIcommand *command, G4String new
     fAdePTConfiguration->SetHitBufferFlushThreshold(fSetHitBufferFlushThresholdCmd->GetNewDoubleValue(newValue));
   } else if (command == fSetGDMLCmd) {
     fAdePTConfiguration->SetVecGeomGDML(newValue);
+  } else if (command == fSetCovfieFileCmd) {
+    fAdePTConfiguration->SetCovfieBfieldFile(newValue);
   } else if (command == fSetCUDAStackLimitCmd) {
     fAdePTConfiguration->SetCUDAStackLimit(fSetCUDAStackLimitCmd->GetNewIntValue(newValue));
   }

@@ -41,6 +41,9 @@ public:
   // We temporarily load VecGeom geometry from GDML
   void SetVecGeomGDML(std::string filename) { fVecGeomGDML = filename; }
 
+  // loading external magnetic field from .cf file
+  void SetCovfieBfieldFile(std::string filename) { fCovfieBfieldFile = filename; }
+
   bool GetTrackInAllRegions() { return fTrackInAllRegions; }
   bool IsAdePTActivated() { return fAdePTActivated; }
   int GetNumThreads() { return fNumThreads; };
@@ -54,6 +57,7 @@ public:
 
   // Temporary
   std::string GetVecGeomGDML() { return fVecGeomGDML; }
+  std::string GetCovfieBfieldFile() { return fCovfieBfieldFile; } // todo add #ifdef guards?
 
 private:
   bool fTrackInAllRegions{false};
@@ -69,6 +73,7 @@ private:
   int fNThread = -1;
 
   std::string fVecGeomGDML{""};
+  std::string fCovfieBfieldFile{""};
   std::unique_ptr<AdePTConfigurationMessenger> fAdePTConfigurationMessenger;
 };
 
