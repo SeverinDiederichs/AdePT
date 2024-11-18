@@ -228,6 +228,9 @@ bool InitializeField(double bz)
 }
 
 bool InitializeGeneralField(GeneralMagneticField& magneticField) {
+
+#ifdef ADEPT_USE_EXT_BFIELD
+
   // Create a view on the device
   auto d_fieldView = magneticField.GetGlobalView();
   if (!d_fieldView) {
@@ -235,8 +238,10 @@ bool InitializeGeneralField(GeneralMagneticField& magneticField) {
     return false;
   }
   COPCORE_CUDA_CHECK(cudaMemcpyToSymbol(MagneticFieldView, &d_fieldView, sizeof(d_fieldView)));
+#endif
   return true;
 }
+
 void PrepareLeakedBuffers(int numLeaked, adeptint::TrackBuffer &buffer, GPUstate &gpuState)
 {
   // Make sure the size of the allocated track array is large enough
