@@ -25,7 +25,7 @@ namespace adept_impl {
 /// Forward declarations for methods implemented in AdePTTransport.cu
 using TrackBuffer = adeptint::TrackBuffer;
 bool InitializeField(double);
-bool InitializeGeneralField(GeneralMagneticField&);
+bool InitializeGeneralField(GeneralMagneticField &);
 bool InitializeVolAuxArray(adeptint::VolAuxArray &);
 void FreeVolAuxArray(adeptint::VolAuxArray &);
 void FreeGeneralField(GeneralMagneticField &);
@@ -63,17 +63,18 @@ bool AdePTTransport<IntegrationLayer>::InitializeField(double bz)
 }
 
 template <typename IntegrationLayer>
-bool AdePTTransport<IntegrationLayer>::InitializeGeneralField() {
+bool AdePTTransport<IntegrationLayer>::InitializeGeneralField()
+{
   if (!fBfieldFile.empty()) {
     // Initialize magnetic field data from file
     if (!fMagneticField.InitializeFromFile(fBfieldFile)) {
       return false;
     }
-    
+
     // Delegate the setup of the global view pointer to adept_impl
     return adept_impl::InitializeGeneralField(fMagneticField);
   }
-  return true;
+  return false;
 }
 
 template <typename IntegrationLayer>
@@ -101,9 +102,8 @@ template <typename IntegrationLayer>
 bool AdePTTransport<IntegrationLayer>::InitializeGeometry(const vecgeom::cxx::VPlacedVolume *world)
 {
   auto &cudaManager = vecgeom::cxx::CudaManager::Instance();
-  if(fCUDAStackLimit > 0)
-  {
-    std::cout <<  "CUDA Device stack limit: " <<  fCUDAStackLimit << "\n";
+  if (fCUDAStackLimit > 0) {
+    std::cout << "CUDA Device stack limit: " << fCUDAStackLimit << "\n";
     cudaDeviceSetLimit(cudaLimitStackSize, fCUDAStackLimit);
   }
   bool success = true;
@@ -167,16 +167,23 @@ void AdePTTransport<IntegrationLayer>::Initialize(bool common_data)
     if (!InitializePhysics())
       throw std::runtime_error("AdePTTransport<IntegrationLayer>::Initialize cannot initialize physics on GPU");
 
-    // Initialize field
+#ifdef ADEPT_USE_EXT_BFIELD
+    // Try to initialize field from file, otherwise initialize from vector
+    if (!InitializeGeneralField()) {
+      throw std::runtime_error(
+          "AdePTTransport<IntegrationLayer>::Initialize cannot initialize GeneralMagneticField on GPU");
+      // NOTE: if the field option is a run-time option and not a compile time option, uncomment the code below
+      // to use uniform field in case no file was provided. ToDo: this requires changing the return of
+      // InitializeGeneralField
+      //   double bz = fIntegrationLayer.GetUniformFieldZ();
+      //   if (!InitializeField(bz))
+      //     throw std::runtime_error("AdePTTransport<IntegrationLayer>::Initialize cannot initialize field on GPU");
+    }
+#endif
+    // Initialize field from vector
     double bz = fIntegrationLayer.GetUniformFieldZ();
     if (!InitializeField(bz))
       throw std::runtime_error("AdePTTransport<IntegrationLayer>::Initialize cannot initialize field on GPU");
-
-#ifdef ADEPT_USE_EXT_BFIELD
-    // initialize general field
-    if (!InitializeGeneralField())
-      throw std::runtime_error("AdePTTransport<IntegrationLayer>::Initialize failed to initialize general field on GPU");
-#endif
 
     // Do the material-cut couple index mapping once
     // as well as set flags for sensitive volumes and region

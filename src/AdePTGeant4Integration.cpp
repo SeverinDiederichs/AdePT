@@ -385,12 +385,15 @@ void AdePTGeant4Integration::FillG4Step(GPUHit const *aGPUHit, G4Step *aG4Step,
                                         G4TouchableHandle &aPreG4TouchableHandle,
                                         G4TouchableHandle &aPostG4TouchableHandle) const
 {
-  const G4ThreeVector aPostStepPointMomentumDirection(aGPUHit->fPostStepPoint.fMomentumDirection.x(), aGPUHit->fPostStepPoint.fMomentumDirection.y(),
-                        aGPUHit->fPostStepPoint.fMomentumDirection.z());
-  const G4ThreeVector aPostStepPointPolarization(aGPUHit->fPostStepPoint.fPolarization.x(), aGPUHit->fPostStepPoint.fPolarization.y(),
-                        aGPUHit->fPostStepPoint.fPolarization.z());
-  const G4ThreeVector aPostStepPointPosition(aGPUHit->fPostStepPoint.fPosition.x(), aGPUHit->fPostStepPoint.fPosition.y(),
-                        aGPUHit->fPostStepPoint.fPosition.z());
+  const G4ThreeVector aPostStepPointMomentumDirection(aGPUHit->fPostStepPoint.fMomentumDirection.x(),
+                                                      aGPUHit->fPostStepPoint.fMomentumDirection.y(),
+                                                      aGPUHit->fPostStepPoint.fMomentumDirection.z());
+  const G4ThreeVector aPostStepPointPolarization(aGPUHit->fPostStepPoint.fPolarization.x(),
+                                                 aGPUHit->fPostStepPoint.fPolarization.y(),
+                                                 aGPUHit->fPostStepPoint.fPolarization.z());
+  const G4ThreeVector aPostStepPointPosition(aGPUHit->fPostStepPoint.fPosition.x(),
+                                             aGPUHit->fPostStepPoint.fPosition.y(),
+                                             aGPUHit->fPostStepPoint.fPosition.z());
 
   // G4Step
   aG4Step->SetStepLength(aGPUHit->fStepLength);                 // Real data
@@ -404,8 +407,8 @@ void AdePTGeant4Integration::FillG4Step(GPUHit const *aGPUHit, G4Step *aG4Step,
 
   // G4Track
   G4Track *aTrack = aG4Step->GetTrack();
-  aTrack->SetTrackID(aGPUHit->fParentID);       // Missing data
-  aTrack->SetParentID(aGPUHit->fParentID);      // ID of the initial particle that entered AdePT
+  aTrack->SetTrackID(aGPUHit->fParentID);      // Missing data
+  aTrack->SetParentID(aGPUHit->fParentID);     // ID of the initial particle that entered AdePT
   aTrack->SetPosition(aPostStepPointPosition); // Real data
   // aTrack->SetGlobalTime(0);                                                                // Missing data
   // aTrack->SetLocalTime(0);                                                                 // Missing data
@@ -468,7 +471,7 @@ void AdePTGeant4Integration::FillG4Step(GPUHit const *aGPUHit, G4Step *aG4Step,
   // aPostStepPoint->SetGlobalTime(0);                                                                // Missing data
   // aPostStepPoint->SetProperTime(0);                                                                // Missing data
   aPostStepPoint->SetMomentumDirection(aPostStepPointMomentumDirection); // Real data
-  aPostStepPoint->SetKineticEnergy(aGPUHit->fPostStepPoint.fEKin);        // Real data
+  aPostStepPoint->SetKineticEnergy(aGPUHit->fPostStepPoint.fEKin);       // Real data
   // aPostStepPoint->SetVelocity(0);                                                                  // Missing data
   if (const auto postVolume = (*fScoringObjects->fPostG4TouchableHistoryHandle)->GetVolume();
       postVolume != nullptr) { // protect against nullptr if postNavState is outside
@@ -520,10 +523,13 @@ void AdePTGeant4Integration::ReturnTrack(adeptint::TrackData const &track, unsig
 
 double AdePTGeant4Integration::GetUniformFieldZ() const
 {
-  G4UniformMagField *field =
-      (G4UniformMagField *)G4TransportationManager::GetTransportationManager()->GetFieldManager()->GetDetectorField();
-  if (field)
-    return field->GetConstantFieldValue()[2];
-  else
+  G4MagneticField *field =
+      (G4MagneticField *)G4TransportationManager::GetTransportationManager()->GetFieldManager()->GetDetectorField();
+  if (field) {
+    G4double origin[3] = {0., 0., 0.};
+    G4double Bfield[3] = {0., 0., 0.};
+    field->GetFieldValue(origin, Bfield);
+    return Bfield[2];
+  } else
     return 0;
 }

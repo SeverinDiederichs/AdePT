@@ -24,7 +24,8 @@
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-DetectorConstruction::DetectorConstruction(bool allSensitive) : fAllSensitive(allSensitive), G4VUserDetectorConstruction()
+DetectorConstruction::DetectorConstruction(bool allSensitive)
+    : fAllSensitive(allSensitive), G4VUserDetectorConstruction()
 {
   fDetectorMessenger = new DetectorMessenger(this);
 }
@@ -56,16 +57,34 @@ G4VPhysicalVolume *DetectorConstruction::Construct()
 
 void DetectorConstruction::ConstructSDandField()
 {
-  if (fMagFieldVector.mag() > 0.0) {
-    // Apply a global uniform magnetic field along the Z axis.
-    // Notice that only if the magnetic field is not zero, the Geant4
-    // transportion in field gets activated.
-    auto uniformMagField     = new G4UniformMagField(fMagFieldVector);
-    G4FieldManager *fieldMgr = G4TransportationManager::GetTransportationManager()->GetFieldManager();
-    fieldMgr->SetDetectorField(uniformMagField);
-    fieldMgr->CreateChordFinder(uniformMagField);
-    G4cout << G4endl << " *** SETTING MAGNETIC FIELD : fieldValue = " << fMagFieldVector / kilogauss
+
+  // Apply a global uniform magnetic field along the Z axis.
+  // Notice that only if the magnetic field is not zero, the Geant4
+  // transportion in field gets activated.
+
+  std::unique_ptr<IField> field;
+
+#ifdef ADEPT_USE_EXT_BFIELD
+  // Set a 3D magnetic field from file. If no file is provided, no magnetic field is used in the G4 transport
+  if (fFieldFile != "") {
+    G4cout << G4endl << " *** SETTING MAGNETIC FIELD TO READ FROM FILE " << fFieldFile << " *** " << G4endl << G4endl;
+
+    field = std::make_unique<CovfieField>(fFieldFile);
+#else
+  // Set a 3D magnetic field vector for a uniform field in Bz. If no file is provided, no magnetic field is used in the
+  // G4 transport
+  if (std::abs(fMagFieldVector[2]) > 0.0) {
+    G4cout << G4endl
+           << " *** SETTING CONSTANT MAGNETIC FIELD IN Z: fieldValue in z = " << fMagFieldVector[2] / kilogauss
            << " [kilogauss] *** " << G4endl << G4endl;
+
+    field = std::make_unique<UniformField>(fMagFieldVector);
+#endif
+    MagneticField *magneticField = new MagneticField(std::move(field));
+
+    G4FieldManager *fieldMgr = G4TransportationManager::GetTransportationManager()->GetFieldManager();
+    fieldMgr->SetDetectorField(magneticField);
+    fieldMgr->CreateChordFinder(magneticField);
 
   } else {
     G4cout << G4endl << " *** NO MAGNETIC FIELD SET  *** " << G4endl << G4endl;
@@ -95,7 +114,7 @@ void DetectorConstruction::ConstructSDandField()
     int nd          = lvol->GetNoDaughters();
     numTouchables++;
 
-    if(fAllSensitive) // For easier validation of geometries with no SD info, we may set all volumes as sensitive
+    if (fAllSensitive) // For easier validation of geometries with no SD info, we may set all volumes as sensitive
     {
       // Record the PV
       if (caloSD->fSensitivePhysicalVolumes.find(pvol) == caloSD->fSensitivePhysicalVolumes.end()) {
@@ -110,9 +129,7 @@ void DetectorConstruction::ConstructSDandField()
         caloSD->fSensitiveLogicalVolumes.push_back(lvol);
       }
       numSensitiveTouchables++;
-    }
-    else
-    {
+    } else {
       // Check if the LogicalVolume is marked as sensitive in the geometry
       auto aAuxInfoList = fParser.GetVolumeAuxiliaryInformation(lvol);
       for (auto iaux = aAuxInfoList.begin(); iaux != aAuxInfoList.end(); iaux++) {

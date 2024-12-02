@@ -48,8 +48,12 @@ void AdePTTrackingManager::InitializeAdePT()
     // all threads.
     fAdeptTransport = std::make_shared<AdePTTransport<AdePTGeant4Integration>>(*fAdePTConfiguration);
 
-    std::cout << "Reading in covfie file for magnetic field: " << fAdePTConfiguration->GetCovfieBfieldFile() << std::endl;
+#ifdef ADEPT_USE_EXT_BFIELD
+    std::cout << "Reading in covfie file for magnetic field: " << fAdePTConfiguration->GetCovfieBfieldFile()
+              << std::endl;
     fAdeptTransport->SetBfieldFileName(fAdePTConfiguration->GetCovfieBfieldFile());
+    if (fAdePTConfiguration->GetCovfieBfieldFile() == "") std::cout << "No magnetic field file provided!" << std::endl;
+#endif
 
     // Initialize common data:
     // G4HepEM, Upload VecGeom geometry to GPU, Geometry check, Create volume auxiliary data
@@ -135,14 +139,14 @@ void AdePTTrackingManager::PreparePhysicsTable(const G4ParticleDefinition &part)
 void AdePTTrackingManager::HandOverOneTrack(G4Track *aTrack)
 {
   if (fGPURegions.empty() && !fAdeptTransport->GetTrackInAllRegions()) {
-    G4EventManager *eventManager       = G4EventManager::GetEventManager();
-    G4TrackingManager *trackManager    = eventManager->GetTrackingManager();
+    G4EventManager *eventManager    = G4EventManager::GetEventManager();
+    G4TrackingManager *trackManager = eventManager->GetTrackingManager();
     // If there are no GPU regions, track until the end in Geant4
     trackManager->ProcessOneTrack(aTrack);
     if (aTrack->GetTrackStatus() != fStopAndKill) {
       G4Exception("AdePTTrackingManager::HandOverOneTrack", "NotStopped", FatalException, "track was not stopped");
     }
-    G4TrackVector* secondaries = trackManager->GimmeSecondaries();
+    G4TrackVector *secondaries = trackManager->GimmeSecondaries();
     eventManager->StackTracks(secondaries);
     delete aTrack;
     return;
