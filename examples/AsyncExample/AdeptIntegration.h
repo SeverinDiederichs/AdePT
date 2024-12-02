@@ -73,6 +73,8 @@ private:
   std::vector<double> fGPUNetEnergy;
   bool fTrackInAllRegions = false;
   std::vector<std::string> const *fGPURegionNames;
+  std::string fBfieldFile{""};         ///< Path to magnetic field file (in the covfie format)
+  //GeneralMagneticField fMagneticField; ///< arbitrary magnetic field
 
   void FullInit();
   void InitBVH();
@@ -110,6 +112,8 @@ public:
   void SetTrackInAllRegions(bool trackInAllRegions) override { fTrackInAllRegions = trackInAllRegions; }
   bool GetTrackInAllRegions() const override { return fTrackInAllRegions; }
   void SetGPURegionNames(std::vector<std::string> const *regionNames) override { fGPURegionNames = regionNames; }
+  /// @brief Set path to covfie Bfield file
+  void SetBfieldFileName(const std::string &fileName) override { fBfieldFile = fileName; }
   void SetCUDAStackLimit(int limit) override{};
   std::vector<std::string> const *GetGPURegionNames() override { return fGPURegionNames; }
   /// No effect

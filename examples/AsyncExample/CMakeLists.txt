@@ -84,6 +84,15 @@ PUBLIC
   VecGeom::vecgeomcuda_static
   G4HepEm::g4HepEm
   )
+if(ADEPT_USE_EXT_BFIELD)
+# link covfie if external magnetic field usage is enabled
+target_link_libraries(AdePT_G4_integration_async
+  PUBLIC
+    covfie::core
+    covfie::cuda
+)
+endif()
+
 target_include_directories(AdePT_G4_integration_async
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
