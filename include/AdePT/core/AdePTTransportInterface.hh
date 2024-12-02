@@ -34,6 +34,9 @@ public:
   /// @brief Set Geant4 region to which it applies
   virtual void SetGPURegionNames(std::vector<std::string> const *regionNames) = 0;
   virtual std::vector<std::string> const *GetGPURegionNames()                 = 0;
+  /// @brief Set path to covfie magnetic field file
+  /// @param fileName path to magnetic field file
+  virtual void SetBfieldFileName(const std::string &fileName) = 0;
   virtual void SetCUDAStackLimit(int limit)                                   = 0;
   /// @brief Initialize service and copy geometry & physics data on device
   virtual void Initialize(bool common_data = false) = 0;
