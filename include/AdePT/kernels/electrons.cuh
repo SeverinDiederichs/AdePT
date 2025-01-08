@@ -170,11 +170,6 @@ static __device__ __forceinline__ void TransportElectrons(adept::TrackManager<Tr
     // Leave the range and MFP inside the G4HepEmTrack. If we split kernels, we
     // also need to carry them over!
 
-    // Skip electron/positron-nuclear reaction that would need to be handled by G4 itself
-    if (winnerProcessIndex == 3) {
-      winnerProcessIndex = -1;
-    }
-
     // Check if there's a volume boundary in between.
     bool propagated    = true;
     long hitsurf_index = -1;
