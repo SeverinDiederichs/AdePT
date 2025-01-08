@@ -149,7 +149,10 @@ __global__ void InitTracks(adeptint::TrackData *trackinfo, int ntracks, int star
     track.localTime  = trackinfo->localTime;
     track.properTime = trackinfo->properTime;
 
+    // setting up the NavState
     track.navState.Clear();
+    track.navState = trackinfo[i].navState;
+    vecgeom::NavigationState state2 = trackinfo[i].navState;
     // We locate the pushed point because we run the risk that the
     // point is not located in the GPU region
 #ifndef ADEPT_USE_SURF
@@ -166,6 +169,18 @@ __global__ void InitTracks(adeptint::TrackData *trackinfo, int ntracks, int star
 #else
     int lvolID = track.navState.GetLogicalId();
 #endif
+
+printf("Size of vecgeom::NavigationState %lu \n", sizeof(vecgeom::NavigationState));
+    // if (state2.GetNavIndex() != track.navState.GetNavIndex() ) {
+    //   printf("Reproducibility error: Navigation state mismatch!\n");
+    // }
+       
+    // if (lvolID != trackinfo->navState.GetLogicalId() ) {
+    //   printf(" Error in navigation! push yielded state \n");
+    //   // track.navState.Print();
+    //   // printf("State transfer yielded \n");
+    //   trackinfo->navState.Print();
+    // }
     assert(auxDataArray[lvolID].fGPUregion);
   }
 }
@@ -355,6 +370,10 @@ void ShowerGPU(IntegrationLayer &integration, int event, adeptint::TrackBuffer &
   COPCORE_CUDA_CHECK(cudaMemcpyAsync(gpuState.toDevice_dev, buffer.toDevice.data(),
                                      buffer.toDevice.size() * sizeof(adeptint::TrackData), cudaMemcpyHostToDevice,
                                      gpuState.stream));
+
+  COPCORE_CUDA_CHECK(cudaStreamSynchronize(gpuState.stream));
+
+
   // Initialize AdePT tracks using the track buffer copied from CPU
   constexpr int initThreads = 32;
   int initBlocks            = (buffer.toDevice.size() + initThreads - 1) / initThreads;

@@ -64,9 +64,9 @@ template <typename IntegrationLayer>
 void AdePTTransport<IntegrationLayer>::AddTrack(int pdg, int parent_id, double energy, double x, double y, double z,
                                                 double dirx, double diry, double dirz, double globalTime,
                                                 double localTime, double properTime, int /*threadId*/, unsigned int eventId,
-                                                unsigned int /*trackIndex*/)
+                                                unsigned int /*trackIndex*/, vecgeom::NavigationState &state)
 {
-  fBuffer.toDevice.emplace_back(pdg, parent_id, energy, x, y, z, dirx, diry, dirz, globalTime, localTime, properTime);
+  fBuffer.toDevice.emplace_back(pdg, parent_id, energy, x, y, z, dirx, diry, dirz, globalTime, localTime, properTime, state);
   if (pdg == 11)
     fBuffer.nelectrons++;
   else if (pdg == -11)
@@ -219,8 +219,9 @@ template <typename IntegrationLayer>
 void AdePTTransport<IntegrationLayer>::Shower(int event, int /*threadId*/)
 {
   int tid = fIntegrationLayer.GetThreadID();
-  if (fDebugLevel > 0 && fBuffer.toDevice.size() == 0) {
-    std::cout << "[" << tid << "] AdePTTransport<IntegrationLayer>::Shower: No more particles in buffer. Exiting.\n";
+  if (fBuffer.toDevice.size() == 0) {
+    if (fDebugLevel > 0)
+      std::cout << "[" << tid << "] AdePTTransport<IntegrationLayer>::Shower: No more particles in buffer. Exiting.\n";
     return;
   }
 

@@ -206,9 +206,12 @@ void AdePTTrackingManager::ProcessTrack(G4Track *aTrack)
         fTrackCounter   = 0;
       }
 
+      // Get VecGeom Navigation state from G4History
+      vecgeom::NavigationState converted = GetVecGeomFromG4State(aTrack); 
+
       fAdeptTransport->AddTrack(pdg, id, energy, particlePosition[0], particlePosition[1], particlePosition[2],
                                 particleDirection[0], particleDirection[1], particleDirection[2], globalTime, localTime,
-                                properTime, G4Threading::G4GetThreadId(), eventID, fTrackCounter++);
+                                properTime, G4Threading::G4GetThreadId(), eventID, fTrackCounter++, converted);
 
       // The track dies from the point of view of Geant4
       aTrack->SetTrackStatus(fStopAndKill);
@@ -259,4 +262,62 @@ void AdePTTrackingManager::StepInHostRegion(G4Track *aTrack)
       }
     }
   }
+}
+
+const vecgeom::NavigationState AdePTTrackingManager::GetVecGeomFromG4State(const G4Track *aG4Track)
+{
+  // get history and depth from track
+  auto aG4NavigationHistory = aG4Track->GetNextTouchableHandle()->GetHistory();
+  auto aG4HistoryDepth      = aG4NavigationHistory->GetDepth();
+
+  // Initialize the NavState to be filled and push the world to it
+  vecgeom::NavigationState aNavState;
+  auto current_volume = vecgeom::GeoManager::Instance().GetWorld();
+  aNavState.Push(current_volume);
+
+  bool found_volume;
+  // we pushed already the world, so we can start at level 1
+  for (unsigned int level = 1; level <= aG4HistoryDepth; ++level) {
+    found_volume = false;
+
+    // Get current G4 volume and parent volume.
+    const G4VPhysicalVolume *g4Volume_parent = aG4NavigationHistory->GetVolume(level - 1);
+    const G4VPhysicalVolume *g4Volume = aG4NavigationHistory->GetVolume(level);
+
+    // The index of the VecGeom volume on this level (that we need to push the NavState to)
+    // is the same as the G4 volume. The index of the G4 volume is found by matching it against
+    // the daughters of the parent volume, since the G4 volume itself has no index.
+    for (int id = 0; id < g4Volume_parent->GetLogicalVolume()->GetNoDaughters(); ++id) {
+      if (g4Volume == g4Volume_parent->GetLogicalVolume()->GetDaughter(id)) {
+        auto daughter = current_volume->GetLogicalVolume()->GetDaughters()[id];
+        aNavState.Push(daughter);
+        current_volume = daughter;
+        found_volume   = true;
+        break;
+      }
+    }
+
+    if (!found_volume) {
+      throw std::runtime_error("Fatal: G4 To VecGeom Geometry matching failed: G4 Volume name " +
+                               std::string(g4Volume->GetLogicalVolume()->GetName()) +
+                               " was not found in VecGeom Parent volume " +
+                               std::string(current_volume->GetLogicalVolume()->GetName()));
+      std::cout  << "Fatal: G4 To VecGeom Geometry matching failed: G4 Volume name " <<
+                               std::string(g4Volume->GetLogicalVolume()->GetName()) <<
+                               " was not found in VecGeom Parent volume " <<
+                               std::string(current_volume->GetLogicalVolume()->GetName()) << std::endl;
+    }
+  }
+
+  // Set boundary status
+  if (aG4Track->GetStep() != nullptr) { // at initialization, the G4Step is not set yet, then we put OnBoundary to false
+    if (aG4Track->GetStep()->GetPostStepPoint()->GetStepStatus() == fGeomBoundary) {
+      aNavState.SetBoundaryState(true);
+    } else {
+      aNavState.SetBoundaryState(false);
+    }
+  } else {
+    aNavState.SetBoundaryState(false);
+  }
+  return aNavState;
 }
