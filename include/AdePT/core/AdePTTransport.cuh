@@ -108,6 +108,19 @@ G4HepEmState *InitG4HepEm()
   return state;
 }
 
+__device__ bool CompareMemoryOnDevice(const void *a, const void *b, size_t size) {
+    const unsigned char *byteA = static_cast<const unsigned char *>(a);
+    const unsigned char *byteB = static_cast<const unsigned char *>(b);
+
+    for (size_t i = 0; i < size; ++i) {
+        if (byteA[i] != byteB[i]) {
+            printf("Mismatch at byte %lu: A=0x%02x, B=0x%02x\n", i, byteA[i], byteB[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
 // Kernel function to initialize tracks comming from a Geant4 buffer
 __global__ void InitTracks(adeptint::TrackData *trackinfo, int ntracks, int startTrack, int event,
                            Secondaries secondaries, const vecgeom::VPlacedVolume *world, AdeptScoring *userScoring,
@@ -133,6 +146,7 @@ __global__ void InitTracks(adeptint::TrackData *trackinfo, int ntracks, int star
     track.parentID = trackinfo[i].parentID;
 
     track.rngState.SetSeed(1234567 * event + startTrack + i);
+    // track.rngState.SetSeed(1234567);
     track.eKin         = trackinfo[i].eKin;
     track.numIALeft[0] = -1.0;
     track.numIALeft[1] = -1.0;
@@ -151,18 +165,72 @@ __global__ void InitTracks(adeptint::TrackData *trackinfo, int ntracks, int star
 
     // setting up the NavState
     track.navState.Clear();
-    track.navState = trackinfo[i].navState;
-    vecgeom::NavigationState state2 = trackinfo[i].navState;
-    // We locate the pushed point because we run the risk that the
-    // point is not located in the GPU region
-#ifndef ADEPT_USE_SURF
-    AdePTNavigator::LocatePointIn(world, track.pos + tolerance * track.dir, track.navState, true);
-#else
-    AdePTNavigator::LocatePointIn(vecgeom::NavigationState::WorldId(), track.pos + tolerance * track.dir,
-                                  track.navState, true);
-#endif
-    // The track must be on boundary at this point
-    track.navState.SetBoundaryState(true);
+
+
+    // copy via temporary variable, works if and only if we call LocatePointIn afterwards
+    vecgeom::NavigationState tempNavState = trackinfo[i].navState;
+    track.navState = tempNavState;
+
+    // direct assignment (never works)
+    // track.navState = trackinfo[i].navState;
+
+    // piece-wise copy, works if and only if we call LocatePointIn afterwards
+    for (int j = 0; j < sizeof(track.navState) / sizeof(char); ++j) {
+      reinterpret_cast<char*>(&track.navState)[j] = reinterpret_cast<char*>(&trackinfo[i].navState)[j];
+    }
+
+    // printf("RNG state before: %lu %lu %lu %lu %lu %lu %lu %lu %lu\n", track.rngState.fState[0], track.rngState.fState[1], track.rngState.fState[2],
+    // track.rngState.fState[3], track.rngState.fState[4], track.rngState.fState[5], track.rngState.fState[6], track.rngState.fState[7], track.rngState.fState[8]);
+    vecgeom::NavigationState dummyState;
+    dummyState.Clear();
+    AdePTNavigator::LocatePointIn(world, track.pos + tolerance * track.dir, dummyState, true);
+    // Compare track.navState and dummyState after calling LocatePointIn
+    if (!CompareMemoryOnDevice(&track.navState, &dummyState, sizeof(vecgeom::NavigationState))) {
+      printf("track.NnavState and dummyState disagree!!\n");
+    }
+    // printf("track.navState address: %p\ndummyState address: %p\n ", &track.navState, &dummyState);
+    // printf("RNG state after:  %lu %lu %lu %lu %lu %lu %lu %lu %lu\n", track.rngState.fState[0], track.rngState.fState[1], track.rngState.fState[2],
+    // track.rngState.fState[3], track.rngState.fState[4], track.rngState.fState[5], track.rngState.fState[6], track.rngState.fState[7], track.rngState.fState[8]);//     // We locate the pushed point because we run the risk that the
+
+// ORIGINAL CODE
+//     // point is not located in the GPU region
+// #ifndef ADEPT_USE_SURF
+//     AdePTNavigator::LocatePointIn(world, track.pos + tolerance * track.dir, track.navState, true);
+// #else
+//     AdePTNavigator::LocatePointIn(vecgeom::NavigationState::WorldId(), track.pos + tolerance * track.dir,
+//                                   track.navState, true);
+// #endif
+//     // The track must be on boundary at this point
+//     track.navState.SetBoundaryState(true);
+
+//       // SOME MORE PRINTOUTS
+//       printf("COPIED:  fNavTuple.fNavInd %u %u %u %u fNavTuple.fLevel %u fLastExited.fNavInd %u %u %u %u fLastExited.fLevel %u LVOLID %u \nLOCATED: fNavTuple.fNavInd %u %u %u %u fNavTuple.fLevel %u fLastExited.fNavInd %u %u %u %u fLastExited.fLevel %u LVOLID %u\n",
+//       tempNavState.fNavTuple.fNavInd[0], 
+//       tempNavState.fNavTuple.fNavInd[1], 
+//       tempNavState.fNavTuple.fNavInd[2], 
+//       tempNavState.fNavTuple.fNavInd[3], 
+//       tempNavState.fNavTuple.fLevel, 
+//       tempNavState.fLastExited.fNavInd[0], 
+//       tempNavState.fLastExited.fNavInd[1], 
+//       tempNavState.fLastExited.fNavInd[2], 
+//       tempNavState.fLastExited.fNavInd[3], 
+//       tempNavState.fLastExited.fLevel,
+//       tempNavState.GetLogicalId(),
+//       track.navState.fNavTuple.fNavInd[0], 
+//       track.navState.fNavTuple.fNavInd[1], 
+//       track.navState.fNavTuple.fNavInd[2], 
+//       track.navState.fNavTuple.fNavInd[3], 
+//       track.navState.fNavTuple.fLevel, 
+//       track.navState.fLastExited.fNavInd[0], 
+//       track.navState.fLastExited.fNavInd[1], 
+//       track.navState.fLastExited.fNavInd[2], 
+//       track.navState.fLastExited.fNavInd[3], 
+//       track.navState.fLastExited.fLevel,
+//       track.navState.GetLogicalId());
+
+// track.navState.Clear();
+//     track.navState = state2; //trackinfo[i].navState;
+
     // nextState is initialized as needed.
 #ifndef ADEPT_USE_SURF
     int lvolID = track.navState.Top()->GetLogicalVolume()->id();
@@ -170,17 +238,6 @@ __global__ void InitTracks(adeptint::TrackData *trackinfo, int ntracks, int star
     int lvolID = track.navState.GetLogicalId();
 #endif
 
-printf("Size of vecgeom::NavigationState %lu \n", sizeof(vecgeom::NavigationState));
-    // if (state2.GetNavIndex() != track.navState.GetNavIndex() ) {
-    //   printf("Reproducibility error: Navigation state mismatch!\n");
-    // }
-       
-    // if (lvolID != trackinfo->navState.GetLogicalId() ) {
-    //   printf(" Error in navigation! push yielded state \n");
-    //   // track.navState.Print();
-    //   // printf("State transfer yielded \n");
-    //   trackinfo->navState.Print();
-    // }
     assert(auxDataArray[lvolID].fGPUregion);
   }
 }
@@ -375,8 +432,12 @@ void ShowerGPU(IntegrationLayer &integration, int event, adeptint::TrackBuffer &
 
 
   // Initialize AdePT tracks using the track buffer copied from CPU
-  constexpr int initThreads = 32;
-  int initBlocks            = (buffer.toDevice.size() + initThreads - 1) / initThreads;
+  // constexpr int initThreads = 32;
+  // int initBlocks            = (buffer.toDevice.size() + initThreads - 1) / initThreads;
+
+  // just for easier debugging, FIXME to be removed
+  constexpr int initThreads = 1;
+  int initBlocks = 1;
 
   InitTracks<<<initBlocks, initThreads, 0, gpuState.stream>>>(gpuState.toDevice_dev, buffer.toDevice.size(),
                                                               buffer.startTrack, event, secondaries, world_dev,
