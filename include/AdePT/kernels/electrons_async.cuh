@@ -137,14 +137,6 @@ static __device__ __forceinline__ void TransportElectrons(Track *electrons, cons
     G4HepEmRandomEngine rnge(&currentTrack.rngState);
 
     // Sample the `number-of-interaction-left` and put it into the track.
-    // for (int ip = 0; ip < 3; ++ip) {
-    //   double numIALeft = currentTrack.numIALeft[ip];
-    //   if (numIALeft <= 0) {
-    //     numIALeft = -std::log(currentTrack.Uniform());
-    //   }
-    //   theTrack->SetNumIALeft(numIALeft, ip);
-    // }
-    // Sample the `number-of-interaction-left` and put it into the track.
     for (int ip = 0; ip < 4; ++ip) {
       double numIALeft = currentTrack.numIALeft[ip];
       if (numIALeft <= 0) {
