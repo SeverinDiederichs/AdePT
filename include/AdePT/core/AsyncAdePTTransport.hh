@@ -10,8 +10,6 @@
 #define ASYNC_ADEPT_TRANSPORT_HH
 
 #define ADEPT_SAVE_IDs
-// #include "TrackTransfer.h"
-// #include "BasicScoring.h"
 
 #include <AdePT/core/AdePTTransportInterface.hh>
 #include <AdePT/core/CommonStruct.h>
@@ -28,17 +26,12 @@
 #include <thread>
 #include <unordered_map>
 
-// struct AdePTScoring;
-
 class G4Region;
 class G4VPhysicalVolume;
 struct G4HepEmState;
-// class AdePTGeant4Integration;
 namespace AsyncAdePT {
 struct TrackBuffer;
 struct GPUstate;
-// enum class EventState : unsigned char;
-// struct HitProcessingContext;
 
 void InitVolAuxArray(adeptint::VolAuxArray &array);
 
@@ -54,9 +47,7 @@ private:
   int fDebugLevel{1};               ///< Debug level
   int fCUDAStackLimit{0};                              ///< CUDA device stack limit
   std::vector<IntegrationLayer> fIntegrationLayerObjects;
-  // We can't use a unique_ptr because we can't have the definition of GPUState
-  // in a file compiled by gcc
-  GPUstate *fGPUstate;               ///< CUDA state placeholder
+  std::unique_ptr<GPUstate, GPUstateDeleter> fGPUstate{nullptr};       ///< CUDA state placeholder
   // We need to use pointers to the scoring objects because we can't have the complete definition 
   // in a file compiled by gcc
   std::vector<AdePTScoring*> fScoring;               ///< User scoring objects per G4 worker
@@ -75,15 +66,6 @@ private:
   bool InitializeField(double bz);
   bool InitializeGeometry(const vecgeom::cxx::VPlacedVolume *world);
   bool InitializePhysics();
-  // void InitializeGPU();
-  void FreeGPU();
-  // /// @brief Asynchronous loop for transporting particles on GPU.
-  // void TransportLoop();
-  // void HitProcessingLoop(HitProcessingContext *const);
-  // void ReturnTracksToG4();
-  // void AdvanceEventStates(EventState oldState, EventState newState);
-  // std::shared_ptr<const std::vector<GPUHit>> GetGPUHits(unsigned int threadId) const;
-
 public:
   AsyncAdePTTransport(AdePTConfiguration &configuration);
   AsyncAdePTTransport(const AsyncAdePTTransport &other) = delete;

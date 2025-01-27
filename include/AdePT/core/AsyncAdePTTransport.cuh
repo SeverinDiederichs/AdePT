@@ -75,7 +75,7 @@ __global__ void InjectTracks(AsyncAdePT::TrackDataWithIDs *trackinfo, int ntrack
                              const vecgeom::VPlacedVolume *world, adept::MParrayT<QueueIndexPair> *toBeEnqueued,
                              uint64_t initialSeed)
 {
-  constexpr double tolerance = 10. * vecgeom::kTolerance;
+  // constexpr double tolerance = 10. * vecgeom::kTolerance;
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < ntracks; i += blockDim.x * gridDim.x) {
     ParticleGenerator *generator = nullptr;
     const auto &trackInfo        = trackinfo[i];
@@ -433,11 +433,10 @@ void FlushScoring(AdePTScoring &scoring)
 /// If successful, this will initialise the member fGPUState.
 /// If memory allocation fails, an exception is thrown. In this case, the caller has to
 /// try again after some wait time or with less transport slots.
-GPUstate *InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
+std::unique_ptr<GPUstate, GPUstateDeleter> InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
                         std::vector<AdePTScoring *> &scoring)
 {
-  // auto gpuState_ptr   = std::make_unique<GPUstate>();
-  auto gpuState_ptr  = new GPUstate();
+  auto gpuState_ptr   = std::unique_ptr<GPUstate, GPUstateDeleter>(new GPUstate());
   GPUstate &gpuState = *gpuState_ptr;
 
   // Allocate structures to manage tracks of an implicit type:
@@ -521,8 +520,7 @@ GPUstate *InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads, 
   scoring.reserve(numThreads);
   for (unsigned int i = 0; i < numThreads; ++i) {
     // TODO: This seems to build the object in gpuState.fScoring_dev + i,
-    // rather than passing the address as an argument to the constructor,
-    // investigate why
+    // rather than passing the address as an argument to the constructor
     // scoring.emplace_back(gpuState.fScoring_dev + i);
     scoring.push_back(new PerEventScoring(gpuState.fScoring_dev + i));
   }
@@ -542,8 +540,6 @@ GPUstate *InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads, 
     partType.tracks = trackStorage_dev;
   }
 
-  // fGPUstate = std::move(gpuState_ptr);
-  // fGPUstate = gpuState_ptr;
   return gpuState_ptr;
 }
 
@@ -600,34 +596,17 @@ void HitProcessingLoop(HitProcessingContext *const context, GPUstate &gpuState,
 }
 
 void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
-                   GPUstate *gpuStatePtr, std::vector<std::atomic<EventState>> &eventStates,
+                   GPUstate &gpuState, std::vector<std::atomic<EventState>> &eventStates,
                    std::condition_variable &cvG4Workers, std::vector<AdePTScoring *> &scoring, 
                    int adeptSeed)
 {
   // NVTXTracer tracer{"TransportLoop"};
 
-  // Initialise the transport engine:
-  // do {
-  //   try {
-  //     gpuStatePtr = InitializeGPU(trackCapacity, scoringCapacity, numThreads, trackBuffer, scoring);
-  //   } catch (std::invalid_argument &exc) {
-  //     // Clear error state:
-  //     auto result = cudaGetLastError();
-  //     std::cerr << "\nError: AdePT failed to initialise the device (" << cudaGetErrorName(result) << "):\n"
-  //               << exc.what() << "\nReducing track capacity: " << trackCapacity << " --> " << trackCapacity * 0.9
-  //               << '\n';
-  //     trackCapacity *= 0.9;
-
-  //     if (trackCapacity < 10000) throw std::runtime_error{"AdePT is unable to allocate GPU memory."};
-  //   }
-  // } while (!gpuStatePtr);
-
   using InjectState                             = GPUstate::InjectState;
   using ExtractState                            = GPUstate::ExtractState;
   auto &cudaManager                             = vecgeom::cxx::CudaManager::Instance();
   const vecgeom::cuda::VPlacedVolume *world_dev = cudaManager.world_gpu();
-  GPUstate &gpuState                            = *gpuStatePtr;
-
+  
   ParticleType &electrons = gpuState.particles[ParticleType::Electron];
   ParticleType &positrons = gpuState.particles[ParticleType::Positron];
   ParticleType &gammas    = gpuState.particles[ParticleType::Gamma];
@@ -1083,62 +1062,38 @@ void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, Track
   // fGPUstate = nullptr;
 }
 
-std::shared_ptr<const std::vector<GPUHit>> GetGPUHits(unsigned int threadId, GPUstate *gpuState)
+std::shared_ptr<const std::vector<GPUHit>> GetGPUHits(unsigned int threadId, GPUstate &gpuState)
 {
-  return gpuState->fHitScoring->GetNextHitsVector(threadId);
+  return gpuState.fHitScoring->GetNextHitsVector(threadId);
 }
 
 // TODO: Make it clear that this will initialize and return the GPUState or make a 
 // separate init function that will compile here and be called from the .icc
 std::thread LaunchGPUWorker(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
-                            GPUstate *gpuStatePtr, std::vector<std::atomic<EventState>> &eventStates,
+                            GPUstate& gpuState, std::vector<std::atomic<EventState>> &eventStates,
                             std::condition_variable &cvG4Workers, std::vector<AdePTScoring *> &scoring, int adeptSeed)
 {
-  // Initialize the GPUState
-  // do {
-  //   try {
-  //     gpuStatePtr = InitializeGPU(trackCapacity, scoringCapacity, numThreads, trackBuffer, scoring);
-  //   } catch (std::invalid_argument &exc) {
-  //     // Clear error state:
-  //     auto result = cudaGetLastError();
-  //     std::cerr << "\nError: AdePT failed to initialise the device (" << cudaGetErrorName(result) << "):\n"
-  //               << exc.what() << "\nReducing track capacity: " << trackCapacity << " --> " << trackCapacity * 0.9
-  //               << '\n';
-  //     trackCapacity *= 0.9;
-
-  //     if (trackCapacity < 10000) throw std::runtime_error{"AdePT is unable to allocate GPU memory."};
-  //   }
-  // } while (!gpuStatePtr);
-
   return std::thread{&TransportLoop, trackCapacity, scoringCapacity, numThreads, std::ref(trackBuffer),
-                     gpuStatePtr, std::ref(eventStates), std::ref(cvG4Workers), std::ref(scoring), adeptSeed};
+                     std::ref(gpuState), std::ref(eventStates), std::ref(cvG4Workers), std::ref(scoring), adeptSeed};
 }
 
-void FreeGPU(GPUstate &gpuState, G4HepEmState &g4hepem_state, std::thread &gpuWorker)
+void FreeGPU(std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> &gpuState, G4HepEmState &g4hepem_state, std::thread &gpuWorker)
 {
-  gpuState.runTransport = false;
+  gpuState->runTransport = false;
   gpuWorker.join();
 
   adeptint::VolAuxData *volAux = nullptr;
   COPCORE_CUDA_CHECK(cudaMemcpyFromSymbol(&volAux, AsyncAdePT::gVolAuxData, sizeof(adeptint::VolAuxData *)));
   COPCORE_CUDA_CHECK(cudaFree(volAux));
-
+  
   // Free resources.
-  // TODO: Try to use ResourceManager for this pointer
-  // gpuState.reset();
-  cudaFree(&gpuState);
-
-
-  // TODO: GPUstate is no longer a unique_ptr inside AsyncAdePTTransport,
-  // check if there's any further cleanup required
+  gpuState.reset();
 
   // Free G4HepEm data
   FreeG4HepEmData(g4hepem_state.fData);
 }
 
 } // namespace async_adept_impl
-
-///////////////////////
 
 namespace AsyncAdePT {
 

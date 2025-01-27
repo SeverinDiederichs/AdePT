@@ -6,7 +6,14 @@
 
 namespace AsyncAdePT {
 
+struct GPUstate;
 static constexpr int kMaxThreads = 256;
+
+// We need a deleter for the unique_ptr to the GPUstate
+// This deleter is implemented in AsyncAdePTTransportStruct.cuh
+struct GPUstateDeleter {
+  void operator()(GPUstate* ptr);
+};
 
 enum class EventState : unsigned char {
     NewTracksFromG4,
