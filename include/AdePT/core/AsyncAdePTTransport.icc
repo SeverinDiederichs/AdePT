@@ -45,10 +45,12 @@ G4HepEmState *InitG4HepEm();
 void FlushScoring(AdePTScoring &);
 std::shared_ptr<const std::vector<GPUHit>> GetGPUHits(unsigned int, AsyncAdePT::GPUstate &);
 std::thread LaunchGPUWorker(int, int, int, AsyncAdePT::TrackBuffer &, AsyncAdePT::GPUstate &,
-                            std::vector<std::atomic<AsyncAdePT::EventState>> &, std::condition_variable &, 
-                            std::vector<AdePTScoring *>&, int);
-std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads, AsyncAdePT::TrackBuffer &trackBuffer,
-                        std::vector<AdePTScoring *> &scoring);
+                            std::vector<std::atomic<AsyncAdePT::EventState>> &, std::condition_variable &,
+                            std::vector<AdePTScoring> &, int);
+std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> InitializeGPU(int trackCapacity, int scoringCapacity,
+                                                                                 int numThreads,
+                                                                                 AsyncAdePT::TrackBuffer &trackBuffer,
+                                                                                 std::vector<AdePTScoring> &scoring);
 void FreeGPU(std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> &, G4HepEmState &, std::thread &);
 } // namespace async_adept_impl
 
@@ -102,16 +104,30 @@ template <typename IntegrationLayer>
 void AsyncAdePTTransport<IntegrationLayer>::AddTrack(int pdg, int parentID, double energy, double x, double y, double z,
                                                      double dirx, double diry, double dirz, double globalTime,
                                                      double localTime, double properTime, int threadId,
-                                                     unsigned int eventId, unsigned int trackId, vecgeom::NavigationState &&state)
+                                                     unsigned int eventId, unsigned int trackId,
+                                                     vecgeom::NavigationState &&state)
 {
   if (pdg != 11 && pdg != -11 && pdg != 22) {
     G4cerr << __FILE__ << ":" << __LINE__ << ": Only supporting EM tracks. Got pdgID=" << pdg << "\n";
     return;
   }
 
-  TrackDataWithIDs track{pdg,       parentID,   energy,  x,       y,
-                         z,         dirx,       diry,    dirz,    globalTime,
-                         localTime, properTime, std::move(state), eventId, trackId, static_cast<short>(threadId)};
+  TrackDataWithIDs track{pdg,
+                         parentID,
+                         energy,
+                         x,
+                         y,
+                         z,
+                         dirx,
+                         diry,
+                         dirz,
+                         globalTime,
+                         localTime,
+                         properTime,
+                         std::move(state),
+                         eventId,
+                         trackId,
+                         static_cast<short>(threadId)};
   if (fDebugLevel >= 2) {
     fGPUNetEnergy[threadId] += energy;
     if (fDebugLevel >= 6) {
@@ -207,7 +223,7 @@ void AsyncAdePTTransport<IntegrationLayer>::Initialize()
     g4int.InitScoringData();
   }
 
-  // TODO: Make this configurable or figure out a reasonable value (Currently, it seems that the 
+  // TODO: Make this configurable or figure out a reasonable value (Currently, it seems that the
   // to device buffer is often full)
   // Allocate buffers to transport particles to/from device. Scale the size of the staging area
   // with the number of threads.
@@ -215,7 +231,7 @@ void AsyncAdePTTransport<IntegrationLayer>::Initialize()
 
   assert(fBuffer != nullptr);
 
-  fGPUstate = async_adept_impl::InitializeGPU(fTrackCapacity, fScoringCapacity, fNThread, *fBuffer, fScoring);
+  fGPUstate  = async_adept_impl::InitializeGPU(fTrackCapacity, fScoringCapacity, fNThread, *fBuffer, fScoring);
   fGPUWorker = async_adept_impl::LaunchGPUWorker(fTrackCapacity, fScoringCapacity, fNThread, *fBuffer, *fGPUstate,
                                                  fEventStates, fCV_G4Workers, fScoring, fAdePTSeed);
 }
@@ -305,7 +321,7 @@ void AsyncAdePTTransport<IntegrationLayer>::Flush(G4int threadId, G4int eventId)
   }
 
   if (tracks.empty()) {
-    async_adept_impl::FlushScoring(*fScoring[threadId]);
+    async_adept_impl::FlushScoring(fScoring[threadId]);
 
     // TODO: Most likely this needs to go to AsyncAdePTTransport in a function that
     // we will forward-declare here (Otherwise AdePTScoring is undefined)

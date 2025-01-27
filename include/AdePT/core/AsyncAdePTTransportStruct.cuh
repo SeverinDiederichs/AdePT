@@ -204,7 +204,8 @@ struct GPUstate {
 };
 
 // Implementation of the GPUstate deleter
-void GPUstateDeleter::operator()(GPUstate* ptr) {
+void GPUstateDeleter::operator()(GPUstate *ptr)
+{
   delete ptr;
 }
 

@@ -105,44 +105,44 @@ __global__ void InjectTracks(AsyncAdePT::TrackDataWithIDs *trackinfo, int ntrack
     track.navState = trackinfo[i].navState;
     toBeEnqueued->push_back(QueueIndexPair{slot, queueIndex});
 
-// FIXME KEEP OLD IMPLEMENTATION SINCE THIS HAS NOT BEEN TESTED THOROUGLY, THEN REMOVE
-//     // We locate the pushed point because we run the risk that the
-//     // point is not located in the GPU region
-// #ifdef NDEBUG
-//     constexpr int maxAttempt = 2;
-// #else
-//     constexpr int maxAttempt = 10;
-// #endif
-//     for (int attempt = 1; attempt < maxAttempt; ++attempt) {
-//       const auto amount = attempt < 5 ? attempt : (attempt - 5) * -1;
-//       track.navState.Clear();
-//       const auto pushedPosition = track.pos + amount * tolerance * track.dir;
-//       BVHNavigator::LocatePointIn(world, pushedPosition, track.navState, true);
-//       // The track must be on boundary at this point
-//       track.navState.SetBoundaryState(true);
-//       // nextState is initialized as needed.
-// #ifndef NDEBUG
-//       const vecgeom::VPlacedVolume *volume = track.navState.Top();
-//       int lvolID                           = volume->GetLogicalVolume()->id();
-//       adeptint::VolAuxData const &auxData  = AsyncAdePT::gVolAuxData[lvolID];
-//       if (auxData.fGPUregion && attempt == 1) {
-//         break;
-//       } else {
-//         printf("Error [%d, %d]: ev=%d track=%d thread=%d: GPUregion=%d volID=%d "
-//                "x=(%18.15f, %18.15f, %18.15f) dir=(%f, %f, %f) "
-//                "Safety=%17.15f DistanceToOut=%f shiftAmount=%d\n",
-//                blockIdx.x, threadIdx.x, trackInfo.eventId, trackInfo.trackId, trackInfo.threadId, auxData.fGPUregion,
-//                volume->id(), pushedPosition[0], pushedPosition[1], pushedPosition[2], track.dir[0], track.dir[1],
-//                track.dir[2], BVHNavigator::ComputeSafety(pushedPosition, track.navState),
-//                volume->DistanceToOut(track.pos, track.dir), amount);
-//         track.navState.Print();
-//         if (auxData.fGPUregion) {
-//           printf("Success in attempt %d shiftAmount %d\n", attempt, amount);
-//           break;
-//         }
-//       }
-// #endif
-//     }
+    // FIXME KEEP OLD IMPLEMENTATION SINCE THIS HAS NOT BEEN TESTED THOROUGLY, THEN REMOVE
+    //     // We locate the pushed point because we run the risk that the
+    //     // point is not located in the GPU region
+    // #ifdef NDEBUG
+    //     constexpr int maxAttempt = 2;
+    // #else
+    //     constexpr int maxAttempt = 10;
+    // #endif
+    //     for (int attempt = 1; attempt < maxAttempt; ++attempt) {
+    //       const auto amount = attempt < 5 ? attempt : (attempt - 5) * -1;
+    //       track.navState.Clear();
+    //       const auto pushedPosition = track.pos + amount * tolerance * track.dir;
+    //       BVHNavigator::LocatePointIn(world, pushedPosition, track.navState, true);
+    //       // The track must be on boundary at this point
+    //       track.navState.SetBoundaryState(true);
+    //       // nextState is initialized as needed.
+    // #ifndef NDEBUG
+    //       const vecgeom::VPlacedVolume *volume = track.navState.Top();
+    //       int lvolID                           = volume->GetLogicalVolume()->id();
+    //       adeptint::VolAuxData const &auxData  = AsyncAdePT::gVolAuxData[lvolID];
+    //       if (auxData.fGPUregion && attempt == 1) {
+    //         break;
+    //       } else {
+    //         printf("Error [%d, %d]: ev=%d track=%d thread=%d: GPUregion=%d volID=%d "
+    //                "x=(%18.15f, %18.15f, %18.15f) dir=(%f, %f, %f) "
+    //                "Safety=%17.15f DistanceToOut=%f shiftAmount=%d\n",
+    //                blockIdx.x, threadIdx.x, trackInfo.eventId, trackInfo.trackId, trackInfo.threadId,
+    //                auxData.fGPUregion, volume->id(), pushedPosition[0], pushedPosition[1], pushedPosition[2],
+    //                track.dir[0], track.dir[1], track.dir[2], BVHNavigator::ComputeSafety(pushedPosition,
+    //                track.navState), volume->DistanceToOut(track.pos, track.dir), amount);
+    //         track.navState.Print();
+    //         if (auxData.fGPUregion) {
+    //           printf("Success in attempt %d shiftAmount %d\n", attempt, amount);
+    //           break;
+    //         }
+    //       }
+    // #endif
+    //     }
   }
 }
 
@@ -426,17 +426,16 @@ void FlushScoring(AdePTScoring &scoring)
 {
   scoring.CopyToHost();
   scoring.ClearGPU();
-  // adept_scoring::EndOfTransport(scoring, nullptr, nullptr, nullptr);
 }
 
 /// Allocate memory on device, as well as streams and cuda events to synchronise kernels.
 /// If successful, this will initialise the member fGPUState.
 /// If memory allocation fails, an exception is thrown. In this case, the caller has to
 /// try again after some wait time or with less transport slots.
-std::unique_ptr<GPUstate, GPUstateDeleter> InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
-                        std::vector<AdePTScoring *> &scoring)
+std::unique_ptr<GPUstate, GPUstateDeleter> InitializeGPU(int trackCapacity, int scoringCapacity, int numThreads,
+                                                         TrackBuffer &trackBuffer, std::vector<AdePTScoring> &scoring)
 {
-  auto gpuState_ptr   = std::unique_ptr<GPUstate, GPUstateDeleter>(new GPUstate());
+  auto gpuState_ptr  = std::unique_ptr<GPUstate, GPUstateDeleter>(new GPUstate());
   GPUstate &gpuState = *gpuState_ptr;
 
   // Allocate structures to manage tracks of an implicit type:
@@ -519,10 +518,7 @@ std::unique_ptr<GPUstate, GPUstateDeleter> InitializeGPU(int trackCapacity, int 
   scoring.clear();
   scoring.reserve(numThreads);
   for (unsigned int i = 0; i < numThreads; ++i) {
-    // TODO: This seems to build the object in gpuState.fScoring_dev + i,
-    // rather than passing the address as an argument to the constructor
-    // scoring.emplace_back(gpuState.fScoring_dev + i);
-    scoring.push_back(new PerEventScoring(gpuState.fScoring_dev + i));
+    scoring.emplace_back(gpuState.fScoring_dev + i);
   }
   gpuState.fHitScoring.reset(new HitScoring(scoringCapacity, numThreads));
 
@@ -543,7 +539,6 @@ std::unique_ptr<GPUstate, GPUstateDeleter> InitializeGPU(int trackCapacity, int 
   return gpuState_ptr;
 }
 
-
 void AdvanceEventStates(EventState oldState, EventState newState, std::vector<std::atomic<EventState>> &eventStates)
 {
   for (auto &eventState : eventStates) {
@@ -552,7 +547,8 @@ void AdvanceEventStates(EventState oldState, EventState newState, std::vector<st
   }
 }
 
-__host__ void ReturnTracksToG4(TrackBuffer &trackBuffer, GPUstate &gpuState, std::vector<std::atomic<EventState>> &eventStates)
+__host__ void ReturnTracksToG4(TrackBuffer &trackBuffer, GPUstate &gpuState,
+                               std::vector<std::atomic<EventState>> &eventStates)
 {
   std::scoped_lock lock{trackBuffer.fromDeviceMutex};
   const auto &fromDevice                      = trackBuffer.fromDevice_host.get();
@@ -578,8 +574,7 @@ __host__ void ReturnTracksToG4(TrackBuffer &trackBuffer, GPUstate &gpuState, std
 }
 
 void HitProcessingLoop(HitProcessingContext *const context, GPUstate &gpuState,
-                       std::vector<std::atomic<EventState>> &eventStates, 
-                       std::condition_variable &cvG4Workers)
+                       std::vector<std::atomic<EventState>> &eventStates, std::condition_variable &cvG4Workers)
 {
   while (context->keepRunning) {
     std::unique_lock lock(context->mutex);
@@ -595,10 +590,9 @@ void HitProcessingLoop(HitProcessingContext *const context, GPUstate &gpuState,
   }
 }
 
-void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
-                   GPUstate &gpuState, std::vector<std::atomic<EventState>> &eventStates,
-                   std::condition_variable &cvG4Workers, std::vector<AdePTScoring *> &scoring, 
-                   int adeptSeed)
+void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer, GPUstate &gpuState,
+                   std::vector<std::atomic<EventState>> &eventStates, std::condition_variable &cvG4Workers,
+                   std::vector<AdePTScoring> &scoring, int adeptSeed)
 {
   // NVTXTracer tracer{"TransportLoop"};
 
@@ -606,7 +600,7 @@ void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, Track
   using ExtractState                            = GPUstate::ExtractState;
   auto &cudaManager                             = vecgeom::cxx::CudaManager::Instance();
   const vecgeom::cuda::VPlacedVolume *world_dev = cudaManager.world_gpu();
-  
+
   ParticleType &electrons = gpuState.particles[ParticleType::Electron];
   ParticleType &positrons = gpuState.particles[ParticleType::Positron];
   ParticleType &gammas    = gpuState.particles[ParticleType::Gamma];
@@ -629,10 +623,8 @@ void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, Track
   };
 
   std::unique_ptr<HitProcessingContext> hitProcessing{new HitProcessingContext{transferStream}};
-  std::thread hitProcessingThread{&HitProcessingLoop, (HitProcessingContext*)hitProcessing.get(), 
-                                                      std::ref(gpuState), 
-                                                      std::ref(eventStates), 
-                                                      std::ref(cvG4Workers)};
+  std::thread hitProcessingThread{&HitProcessingLoop, (HitProcessingContext *)hitProcessing.get(), std::ref(gpuState),
+                                  std::ref(eventStates), std::ref(cvG4Workers)};
 
   auto computeThreadsAndBlocks = [](unsigned int nParticles) -> std::pair<unsigned int, unsigned int> {
     constexpr int TransportThreads             = 256;
@@ -734,9 +726,9 @@ void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, Track
           // if (fDebugLevel > 3) std::cout << "Injecting " << nInject << " to GPU\n";
 
           // copy buffer of tracks to device
-          COPCORE_CUDA_CHECK(
-              cudaMemcpyAsync(trackBuffer.toDevice_dev.get(), toDevice.tracks,
-                              nInject * sizeof(TrackDataWithIDs), cudaMemcpyHostToDevice, transferStream));
+          COPCORE_CUDA_CHECK(cudaMemcpyAsync(trackBuffer.toDevice_dev.get(), toDevice.tracks,
+                                             nInject * sizeof(TrackDataWithIDs), cudaMemcpyHostToDevice,
+                                             transferStream));
           // Mark end of copy operation:
           COPCORE_CUDA_CHECK(cudaEventRecord(cudaEvent, transferStream));
 
@@ -857,12 +849,10 @@ void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, Track
         // Populate the staging buffer and copy to host
         constexpr unsigned int block_size = 128;
         const unsigned int grid_size      = (trackBuffer.fNumFromDevice + block_size - 1) / block_size;
-        FillFromDeviceBuffer<<<grid_size, block_size, 0, transferStream>>>(
-            allLeaked, trackBuffer.fromDevice_dev.get(),
-            trackBuffer.fNumFromDevice);
-        COPCORE_CUDA_CHECK(cudaMemcpyFromSymbolAsync(
-            trackBuffer.nFromDevice_host.get(), nFromDevice_dev,
-            sizeof(unsigned int), 0, cudaMemcpyDeviceToHost, transferStream));
+        FillFromDeviceBuffer<<<grid_size, block_size, 0, transferStream>>>(allLeaked, trackBuffer.fromDevice_dev.get(),
+                                                                           trackBuffer.fNumFromDevice);
+        COPCORE_CUDA_CHECK(cudaMemcpyFromSymbolAsync(trackBuffer.nFromDevice_host.get(), nFromDevice_dev,
+                                                     sizeof(unsigned int), 0, cudaMemcpyDeviceToHost, transferStream));
         COPCORE_CUDA_CHECK(cudaLaunchHostFunc(
             transferStream,
             [](void *arg) { (*static_cast<decltype(GPUstate::extractState) *>(arg)) = ExtractState::ReadyToCopy; },
@@ -878,30 +868,28 @@ void TransportLoop(int trackCapacity, int scoringCapacity, int numThreads, Track
 
       if (gpuState.extractState == ExtractState::ReadyToCopy) {
         gpuState.extractState = ExtractState::CopyToHost;
-        COPCORE_CUDA_CHECK(cudaMemcpyAsync(
-            trackBuffer.fromDevice_host.get(), trackBuffer.fromDevice_dev.get(),
-            (*trackBuffer.nFromDevice_host) * sizeof(TrackDataWithIDs), cudaMemcpyDeviceToHost, transferStream));
-        
+        COPCORE_CUDA_CHECK(cudaMemcpyAsync(trackBuffer.fromDevice_host.get(), trackBuffer.fromDevice_dev.get(),
+                                           (*trackBuffer.nFromDevice_host) * sizeof(TrackDataWithIDs),
+                                           cudaMemcpyDeviceToHost, transferStream));
+
         struct CallbackData {
-            TrackBuffer* trackBuffer;
-            GPUstate* gpuState; 
-            std::vector<std::atomic<EventState>>* eventStates;
+          TrackBuffer *trackBuffer;
+          GPUstate *gpuState;
+          std::vector<std::atomic<EventState>> *eventStates;
         };
 
-        // Needs to be dynamically allocated, since the callback may execute after 
+        // Needs to be dynamically allocated, since the callback may execute after
         // the current scope has ended.
-        CallbackData* data = new CallbackData{&trackBuffer, &gpuState, &eventStates};
+        CallbackData *data = new CallbackData{&trackBuffer, &gpuState, &eventStates};
 
         COPCORE_CUDA_CHECK(cudaLaunchHostFunc(
-              transferStream,
-              [](void *userData) {
-                  CallbackData* data = static_cast<CallbackData*>(userData);
-                  ReturnTracksToG4(*data->trackBuffer, 
-                                  *data->gpuState,
-                                  *data->eventStates);
-                  delete data;
-              },
-              data));
+            transferStream,
+            [](void *userData) {
+              CallbackData *data = static_cast<CallbackData *>(userData);
+              ReturnTracksToG4(*data->trackBuffer, *data->gpuState, *data->eventStates);
+              delete data;
+            },
+            data));
       }
 
       // -------------------------
@@ -1067,17 +1055,19 @@ std::shared_ptr<const std::vector<GPUHit>> GetGPUHits(unsigned int threadId, GPU
   return gpuState.fHitScoring->GetNextHitsVector(threadId);
 }
 
-// TODO: Make it clear that this will initialize and return the GPUState or make a 
+// TODO: Make it clear that this will initialize and return the GPUState or make a
 // separate init function that will compile here and be called from the .icc
 std::thread LaunchGPUWorker(int trackCapacity, int scoringCapacity, int numThreads, TrackBuffer &trackBuffer,
-                            GPUstate& gpuState, std::vector<std::atomic<EventState>> &eventStates,
-                            std::condition_variable &cvG4Workers, std::vector<AdePTScoring *> &scoring, int adeptSeed)
+                            GPUstate &gpuState, std::vector<std::atomic<EventState>> &eventStates,
+                            std::condition_variable &cvG4Workers, std::vector<AdePTScoring> &scoring, int adeptSeed)
 {
-  return std::thread{&TransportLoop, trackCapacity, scoringCapacity, numThreads, std::ref(trackBuffer),
-                     std::ref(gpuState), std::ref(eventStates), std::ref(cvG4Workers), std::ref(scoring), adeptSeed};
+  return std::thread{&TransportLoop,        trackCapacity,      scoringCapacity,       numThreads,
+                     std::ref(trackBuffer), std::ref(gpuState), std::ref(eventStates), std::ref(cvG4Workers),
+                     std::ref(scoring),     adeptSeed};
 }
 
-void FreeGPU(std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> &gpuState, G4HepEmState &g4hepem_state, std::thread &gpuWorker)
+void FreeGPU(std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> &gpuState, G4HepEmState &g4hepem_state,
+             std::thread &gpuWorker)
 {
   gpuState->runTransport = false;
   gpuWorker.join();
@@ -1085,7 +1075,7 @@ void FreeGPU(std::unique_ptr<AsyncAdePT::GPUstate, AsyncAdePT::GPUstateDeleter> 
   adeptint::VolAuxData *volAux = nullptr;
   COPCORE_CUDA_CHECK(cudaMemcpyFromSymbol(&volAux, AsyncAdePT::gVolAuxData, sizeof(adeptint::VolAuxData *)));
   COPCORE_CUDA_CHECK(cudaFree(volAux));
-  
+
   // Free resources.
   gpuState.reset();
 
@@ -1150,7 +1140,6 @@ TrackBuffer::TrackBuffer(unsigned int numToDevice, unsigned int numFromDevice, u
   toDeviceBuffer[1].maxTracks = numToDevice;
   toDeviceBuffer[1].nTrack    = 0;
 }
-
 
 } // namespace AsyncAdePT
 

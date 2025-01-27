@@ -12,25 +12,25 @@ static constexpr int kMaxThreads = 256;
 // We need a deleter for the unique_ptr to the GPUstate
 // This deleter is implemented in AsyncAdePTTransportStruct.cuh
 struct GPUstateDeleter {
-  void operator()(GPUstate* ptr);
+  void operator()(GPUstate *ptr);
 };
 
 enum class EventState : unsigned char {
-    NewTracksFromG4,
-    G4RequestsFlush,
-    Inject,
-    InjectionCompleted,
-    Transporting,
-    WaitingForTransportToFinish,
-    RequestHitFlush,
-    FlushingHits,
-    HitsFlushed,
-    FlushingTracks,
-    DeviceFlushed,
-    LeakedTracksRetrieved,
-    ScoringRetrieved
+  NewTracksFromG4,
+  G4RequestsFlush,
+  Inject,
+  InjectionCompleted,
+  Transporting,
+  WaitingForTransportToFinish,
+  RequestHitFlush,
+  FlushingHits,
+  HitsFlushed,
+  FlushingTracks,
+  DeviceFlushed,
+  LeakedTracksRetrieved,
+  ScoringRetrieved
 };
 
-}
+} // namespace AsyncAdePT
 
 #endif
