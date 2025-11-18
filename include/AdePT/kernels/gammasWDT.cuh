@@ -346,6 +346,19 @@ __global__ void __launch_bounds__(256, 1)
     thePrimaryTrack->SetGStepLength(0.0);
     thePrimaryTrack->SetOnBoundary(nextState.IsOnBoundary());
 
+    // Adjusting the step length:
+    // since fake interactions move the point but don't generate actual physics steps,
+    // the final step length needs to reflect the full step. Thus, the step length of each fake step
+    // is cached in the unused safety. For a real step, the cached previous step length is added and reset.
+    if (realStep) {
+      // add cached fake steps to step length to get correct final step length
+      wdtStepLength += currentTrack.safety;
+      currentTrack.safety = 0;
+    } else {
+      // fake step: to not loose the step length it is cached in the otherwise unused safety:
+      currentTrack.safety += wdtStepLength;
+    }
+
     // END OF WOODCOCK TRACKING
     // here, the original while loop finished. Now, as it is only a single step.
     // Woodcock step has finished, now either a boundary is hit, a discrete process must be invoked,
