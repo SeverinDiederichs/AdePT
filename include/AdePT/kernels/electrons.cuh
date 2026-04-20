@@ -253,8 +253,8 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
     // also need to carry them over!
 
     // Check if there's a volume boundary in between.
-    bool propagated    = true;
-    long hitsurf_index = -1;
+    bool propagated   = true;
+    long nextVolumeId = -1;
     double geometryStepLength;
     bool zero_first_step = false;
 
@@ -263,7 +263,7 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
       geometryStepLength =
           fieldPropagatorRungeKutta<Field_t, RkDriver_t, rk_integration_t, AdePTNavigator>::ComputeStepAndNextVolume(
               magneticField, eKin, restMass, Charge, geometricalStepLengthFromPhysics, safeLength, pos, dir, navState,
-              nextState, hitsurf_index, propagated, /*lengthDone,*/ safety,
+              nextState, nextVolumeId, propagated, /*lengthDone,*/ safety,
               // activeSize < 100 ? max_iterations : max_iters_tail ), // Was
               max_iterations, iterDone, slot, zero_first_step, verbose);
       // In case of zero step detected by the field propagator this could be due to back scattering, or wrong relocation
@@ -271,13 +271,8 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
       // - In case of BS we should just restore the last exited one for the nextState. For now we cannot detect BS.
       // if (zero_first_step) nextState.SetNavIndex(navState.GetLastExitedState());
     } else {
-#ifdef ADEPT_USE_SURF
-      geometryStepLength = AdePTNavigator::ComputeStepAndNextVolume(pos, dir, geometricalStepLengthFromPhysics,
-                                                                    navState, nextState, hitsurf_index);
-#else
-      geometryStepLength = AdePTNavigator::ComputeStepAndNextVolume(pos, dir, geometricalStepLengthFromPhysics,
-                                                                    navState, nextState, kPushDistance);
-#endif
+      geometryStepLength = AdePTNavigator::ComputeStepAndNextVolumeId(pos, dir, geometricalStepLengthFromPhysics,
+                                                                      navState, nextState, nextVolumeId, kPushDistance);
       pos += geometryStepLength * dir;
     }
 
@@ -391,11 +386,7 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
           nextState.Print();
         }
 #endif
-#ifdef ADEPT_USE_SURF
-        AdePTNavigator::RelocateToNextVolume(pos, dir, hitsurf_index, nextState);
-#else
-        AdePTNavigator::RelocateToNextVolume(pos, dir, nextState);
-#endif
+        AdePTNavigator::RelocateToNextVolumeByID(pos, dir, nextVolumeId, nextState);
 
 #if ADEPT_DEBUG_TRACK > 0
         if (verbose) {

@@ -114,14 +114,9 @@ __global__ void __launch_bounds__(256, 1)
 
     // Check if there's a volume boundary in between.
     double geometryStepLength;
-#ifdef ADEPT_USE_SURF
-    long hitsurf_index = -1;
-    geometryStepLength = AdePTNavigator::ComputeStepAndNextVolume(pos, dir, geometricalStepLengthFromPhysics, navState,
-                                                                  nextState, hitsurf_index);
-#else
-    geometryStepLength = AdePTNavigator::ComputeStepAndNextVolume(pos, dir, geometricalStepLengthFromPhysics, navState,
-                                                                  nextState, kPushDistance);
-#endif
+    long nextVolumeId  = -1;
+    geometryStepLength = AdePTNavigator::ComputeStepAndNextVolumeId(pos, dir, geometricalStepLengthFromPhysics,
+                                                                    navState, nextState, nextVolumeId, kPushDistance);
     if (geometryStepLength < kPushStuck && geometryStepLength < geometricalStepLengthFromPhysics) {
       currentTrack.zeroStepCounter++;
       if (currentTrack.zeroStepCounter > kStepsStuckPush) geometryStepLength = kPushStuck;
@@ -171,11 +166,7 @@ __global__ void __launch_bounds__(256, 1)
         double numIALeft          = theTrack->GetNumIALeft(0);
         currentTrack.numIALeft[0] = numIALeft;
 
-#ifdef ADEPT_USE_SURF
-        AdePTNavigator::RelocateToNextVolume(pos, dir, hitsurf_index, nextState);
-#else
-        AdePTNavigator::RelocateToNextVolume(pos, dir, nextState);
-#endif
+        AdePTNavigator::RelocateToNextVolumeByID(pos, dir, nextVolumeId, nextState);
 
 #if ADEPT_DEBUG_TRACK > 0
         if (verbose) {

@@ -33,7 +33,7 @@ public:
   /// @param direction Particle direction
   /// @param[in] current_state Current geometry state
   /// @param[out] next_state Geometry state after propagation
-  /// @param[out] hitsurf_index Index of the hit surface (surface model only)
+  /// @param[out] nextvolume_id Deferred next placed-volume id
   /// @param[out] propagated Checks if the step was fully propagated
   /// @param safetyIn Geometric isotropic safety
   /// @param max_iterations Maximum allowed iterations
@@ -45,7 +45,7 @@ public:
   static inline __host__ __device__ double ComputeStepAndNextVolume(
       Field_t const &magneticField, double kinE, double mass, int charge, double physicsStep, double safeLength,
       vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &direction,
-      vecgeom::NavigationState const &current_state, vecgeom::NavigationState &next_state, long &hitsurf_index,
+      vecgeom::NavigationState const &current_state, vecgeom::NavigationState &next_state, long &nextvolume_id,
       bool &propagated, const Real_t &safetyIn, const int max_iterations, int &iterDone, int threadId,
       bool &zero_first_step, bool verbose = false);
   // Move the track,
@@ -94,7 +94,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
     ComputeStepAndNextVolume(Field_t const &magField, double kinE, double mass, int charge, double physicsStep,
                              double safeLength, vecgeom::Vector3D<double> &position,
                              vecgeom::Vector3D<double> &direction, vecgeom::NavigationState const &current_state,
-                             vecgeom::NavigationState &next_state, long &hitsurf_index, bool &propagated,
+                             vecgeom::NavigationState &next_state, long &nextvolume_id, bool &propagated,
                              const Real_t &safetyIn, //  eventually In/Out ?
                              const int max_iterations,
                              int &itersDone, //  useful for now - to monitor and report -- unclear if needed later
@@ -106,13 +106,8 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
   constexpr bool inZeroFieldRegion =
       false; // This could be a per-region flag ... - better depend on template parameter?
   if (inZeroFieldRegion) {
-#ifdef ADEPT_USE_SURF
-    stepDone = Navigator_t::ComputeStepAndNextVolume(position, direction, remains, current_state, next_state,
-                                                     hitsurf_index, kDistCheckPush);
-#else
-    stepDone =
-        Navigator_t::ComputeStepAndNextVolume(position, direction, remains, current_state, next_state, kDistCheckPush);
-#endif
+    stepDone = Navigator_t::ComputeStepAndNextVolumeId(position, direction, remains, current_state, next_state,
+                                                       nextvolume_id, kDistCheckPush);
     position += stepDone * direction;
     return stepDone;
   }
@@ -219,13 +214,8 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
                  position[0], position[1], position[2], chordDir[0], chordDir[1], chordDir[2], chordLen, kPush);
 #endif
 
-#ifdef ADEPT_USE_SURF
-        move = Navigator_t::ComputeStepAndNextVolume(position, chordDir, chordLen, current_state, next_state,
-                                                     hitsurf_index, kDistCheckPush);
-#else
-        move = Navigator_t::ComputeStepAndNextVolume(position, chordDir, chordLen, current_state, next_state,
-                                                     kDistCheckPush);
-#endif
+        move = Navigator_t::ComputeStepAndNextVolumeId(position, chordDir, chordLen, current_state, next_state,
+                                                       nextvolume_id, kDistCheckPush);
       }
     }
 
@@ -252,13 +242,8 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
       // volume in the first step (by reducing the attempted distance.)
 
       // Deal with back-scattered tracks that need to be relocated. Check distance along initial direction.
-#ifdef ADEPT_USE_SURF
-      move = Navigator_t::ComputeStepAndNextVolume(position, direction, remains, current_state, next_state,
-                                                   hitsurf_index, kDistCheckPush);
-#else
-      move = Navigator_t::ComputeStepAndNextVolume(position, direction, remains, current_state, next_state,
-                                                   kDistCheckPush);
-#endif
+      move = Navigator_t::ComputeStepAndNextVolumeId(position, direction, remains, current_state, next_state,
+                                                     nextvolume_id, kDistCheckPush);
 
       if (move <= kDistCheckPush) {
 #if ADEPT_DEBUG_TRACK > 0

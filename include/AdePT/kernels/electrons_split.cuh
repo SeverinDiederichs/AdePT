@@ -323,8 +323,8 @@ __global__ void ElectronPropagation(Track *electronsOrPositrons, G4HepEmElectron
     G4HepEmRandomEngine rnge(&currentTrack.rngState);
 
     // Check if there's a volume boundary in between.
-    currentTrack.propagated = true;
-    currentTrack.hitsurfID  = -1;
+    currentTrack.propagated   = true;
+    currentTrack.nextVolumeID = -1;
     double geometryStepLength;
     bool zero_first_step = false;
 
@@ -333,8 +333,8 @@ __global__ void ElectronPropagation(Track *electronsOrPositrons, G4HepEmElectron
       geometryStepLength =
           fieldPropagatorRungeKutta<Field_t, RkDriver_t, rk_integration_t, AdePTNavigator>::ComputeStepAndNextVolume(
               magneticField, currentTrack.eKin, restMass, Charge, theTrack->GetGStepLength(), currentTrack.safeLength,
-              currentTrack.pos, currentTrack.dir, currentTrack.navState, currentTrack.nextState, currentTrack.hitsurfID,
-              currentTrack.propagated,
+              currentTrack.pos, currentTrack.dir, currentTrack.navState, currentTrack.nextState,
+              currentTrack.nextVolumeID, currentTrack.propagated,
               /*lengthDone,*/ currentTrack.safety,
               // activeSize < 100 ? max_iterations : max_iters_tail ), // Was
               max_iterations, iterDone, slot, zero_first_step);
@@ -344,15 +344,9 @@ __global__ void ElectronPropagation(Track *electronsOrPositrons, G4HepEmElectron
       // if (zero_first_step) nextState.SetNavIndex(navState.GetLastExitedState());
 
     } else {
-#ifdef ADEPT_USE_SURF
-      geometryStepLength = AdePTNavigator::ComputeStepAndNextVolume(currentTrack.pos, currentTrack.dir,
-                                                                    theTrack->GetGStepLength(), currentTrack.navState,
-                                                                    currentTrack.nextState, currentTrack.hitsurfID);
-#else
-      geometryStepLength =
-          AdePTNavigator::ComputeStepAndNextVolume(currentTrack.pos, currentTrack.dir, theTrack->GetGStepLength(),
-                                                   currentTrack.navState, currentTrack.nextState, kPushDistance);
-#endif
+      geometryStepLength = AdePTNavigator::ComputeStepAndNextVolumeId(
+          currentTrack.pos, currentTrack.dir, theTrack->GetGStepLength(), currentTrack.navState, currentTrack.nextState,
+          currentTrack.nextVolumeID, kPushDistance);
       currentTrack.pos += geometryStepLength * currentTrack.dir;
     }
 
@@ -644,12 +638,8 @@ __global__ void ElectronRelocation(G4HepEmElectronTrack *hepEMTracks, ParticleMa
       // This will happen after recording the step
       // Relocate
       cross_boundary = true;
-#ifdef ADEPT_USE_SURF
-      AdePTNavigator::RelocateToNextVolume(currentTrack.pos, currentTrack.dir, currentTrack.hitsurfID,
-                                           currentTrack.nextState);
-#else
-      AdePTNavigator::RelocateToNextVolume(currentTrack.pos, currentTrack.dir, currentTrack.nextState);
-#endif
+      AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
+                                               currentTrack.nextState);
     } else {
       // Particle left the world, don't enqueue it and release the slot
       slotManager.MarkSlotForFreeing(slot);

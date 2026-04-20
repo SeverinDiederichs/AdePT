@@ -51,7 +51,7 @@ struct Track {
   double preStepGlobalTime{0.};
   // Variables used to store navigation results
   double safeLength{0};
-  long hitsurfID{0};
+  long nextVolumeID{-1};
 #endif
 
   uint64_t trackId{0};  ///< track id (non-consecutive, reproducible)

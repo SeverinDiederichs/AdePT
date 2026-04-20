@@ -29,7 +29,7 @@ public:
   __host__ __device__ double ComputeStepAndNextVolume(double kinE, double mass, int charge, double physicsStep,
                                                       Vector3D &position, Vector3D &direction,
                                                       vecgeom::NavigationState const &current_state,
-                                                      vecgeom::NavigationState &new_state, long &hitsurf_index,
+                                                      vecgeom::NavigationState &new_state, long &nextvolume_id,
                                                       bool &propagated, const double safety = 0.0,
                                                       const int max_iteration = 100);
 
@@ -60,7 +60,7 @@ template <class Navigator>
 __host__ __device__ double fieldPropagatorConstBz::ComputeStepAndNextVolume(
     double kinE, double mass, int charge, double physicsStep, vecgeom::Vector3D<double> &position,
     vecgeom::Vector3D<double> &direction, vecgeom::NavigationState const &current_state,
-    vecgeom::NavigationState &next_state, long &hitsurf_index, bool &propagated, const double safetyIn,
+    vecgeom::NavigationState &next_state, long &nextvolume_id, bool &propagated, const double safetyIn,
     const int max_iterations)
 {
   const double kPush = 0;
@@ -117,12 +117,8 @@ __host__ __device__ double fieldPropagatorConstBz::ComputeStepAndNextVolume(
         safetyOrigin = position;
         safety       = newSafety;
       } else {
-#ifdef ADEPT_USE_SURF
-        move = Navigator::ComputeStepAndNextVolume(position, chordDir, chordLen, current_state, next_state,
-                                                   hitsurf_index, kPush);
-#else
-        move = Navigator::ComputeStepAndNextVolume(position, chordDir, chordLen, current_state, next_state, kPush);
-#endif
+        move = Navigator::ComputeStepAndNextVolumeId(position, chordDir, chordLen, current_state, next_state,
+                                                     nextvolume_id, kPush);
       }
     }
 

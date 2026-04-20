@@ -192,16 +192,10 @@ __global__ void GammaPropagation(Track *gammas, G4HepEmGammaTrack *hepEMTracks, 
     G4HepEmTrack *theTrack        = gammaTrack.GetTrack();
 
     // Check if there's a volume boundary in between.
-#ifdef ADEPT_USE_SURF
-    currentTrack.hitsurfID = -1;
-    auto geometryStepLength =
-        AdePTNavigator::ComputeStepAndNextVolume(currentTrack.pos, currentTrack.dir, theTrack->GetGStepLength(),
-                                                 currentTrack.navState, currentTrack.nextState, currentTrack.hitsurfID);
-#else
-    auto geometryStepLength =
-        AdePTNavigator::ComputeStepAndNextVolume(currentTrack.pos, currentTrack.dir, theTrack->GetGStepLength(),
-                                                 currentTrack.navState, currentTrack.nextState, kPushDistance);
-#endif
+    currentTrack.nextVolumeID = -1;
+    auto geometryStepLength   = AdePTNavigator::ComputeStepAndNextVolumeId(
+        currentTrack.pos, currentTrack.dir, theTrack->GetGStepLength(), currentTrack.navState, currentTrack.nextState,
+        currentTrack.nextVolumeID, kPushDistance);
     //  printf("pvol=%d  step=%g  onboundary=%d  pos={%g, %g, %g}  dir={%g, %g, %g}\n", navState.TopId(),
     //  geometryStepLength,
     //         nextState.IsOnBoundary(), pos[0], pos[1], pos[2], dir[0], dir[1], dir[2]);
@@ -329,12 +323,8 @@ __global__ void GammaRelocation(G4HepEmGammaTrack *hepEMTracks, ParticleManager 
 
       G4HepEmGammaManager::UpdateNumIALeft(theTrack);
 
-#ifdef ADEPT_USE_SURF
-      AdePTNavigator::RelocateToNextVolume(currentTrack.pos, currentTrack.dir, currentTrack.hitsurfID,
-                                           currentTrack.nextState);
-#else
-      AdePTNavigator::RelocateToNextVolume(currentTrack.pos, currentTrack.dir, currentTrack.nextState);
-#endif
+      AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
+                                               currentTrack.nextState);
 
       const int nextlvolID          = currentTrack.nextState.GetLogicalId();
       VolAuxData const &nextauxData = AsyncAdePT::gVolAuxData[nextlvolID];
