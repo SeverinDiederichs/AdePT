@@ -156,6 +156,17 @@ __global__ void __launch_bounds__(256, 1)
     if (nextState.IsOnBoundary()) {
       // For now, just count that we hit something.
 
+      // Complete the deferred relocation before using the state for outside or
+      // logical-volume decisions.
+      AdePTNavigator::RelocateToNextVolumeByID(pos, dir, nextVolumeId, nextState);
+
+#if ADEPT_DEBUG_TRACK > 0
+      if (verbose) {
+        printf("| CROSSED into ");
+        nextState.Print();
+      }
+#endif
+
       // Kill the particle if it left the world.
       if (!nextState.IsOutside()) {
 
@@ -165,15 +176,6 @@ __global__ void __launch_bounds__(256, 1)
         // Use index 0 since numIALeft stores for gammas only the total macroscopic cross section
         double numIALeft          = theTrack->GetNumIALeft(0);
         currentTrack.numIALeft[0] = numIALeft;
-
-        AdePTNavigator::RelocateToNextVolumeByID(pos, dir, nextVolumeId, nextState);
-
-#if ADEPT_DEBUG_TRACK > 0
-        if (verbose) {
-          printf("| CROSSED into ");
-          nextState.Print();
-        }
-#endif
 
         //  Check if the next volume belongs to the GPU region and push it to the appropriate queue
         const int nextlvolID          = nextState.GetLogicalId();

@@ -378,7 +378,7 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
     if (nextState.IsOnBoundary()) {
       // if the particle hit a boundary, and is neither stopped or outside, relocate to have the correct next state
       // before RecordHit is called
-      if (!stopped && !nextState.IsOutside()) {
+      if (!stopped) {
 #if ADEPT_DEBUG_TRACK > 0
         if (verbose) {
           printf("\n| +++ RelocateToNextVolume -position %.17f, %.17f, %.17f -direction %.17f, %.17f, %.17f ", pos[0],

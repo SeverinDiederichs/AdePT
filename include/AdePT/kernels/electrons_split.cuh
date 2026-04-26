@@ -633,15 +633,14 @@ __global__ void ElectronRelocation(G4HepEmElectronTrack *hepEMTracks, ParticleMa
 
     ++currentTrack.looperCounter;
 
-    if (!currentTrack.nextState.IsOutside()) {
-      // Mark the particle. We need to change its navigation state to the next volume before enqueuing it
-      // This will happen after recording the step
-      // Relocate
-      cross_boundary = true;
-      AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
-                                               currentTrack.nextState);
-    } else {
-      // Particle left the world, don't enqueue it and release the slot
+    // Mark the particle. We need to change its navigation state to the next volume before enqueuing it
+    // This will happen after recording the step.
+    cross_boundary = true;
+    AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
+                                             currentTrack.nextState);
+    if (currentTrack.nextState.IsOutside()) {
+      // Particle left the world after the deferred relocation, don't enqueue it and release the slot
+      cross_boundary = false;
       slotManager.MarkSlotForFreeing(slot);
       trackSurvives = false;
     }

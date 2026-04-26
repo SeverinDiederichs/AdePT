@@ -318,13 +318,15 @@ __global__ void GammaRelocation(G4HepEmGammaTrack *hepEMTracks, ParticleManager 
     currentTrack.restrictedPhysicalStepLength = true;
     // For now, just count that we hit something.
 
+    // Complete the deferred relocation before using the state for outside or
+    // logical-volume decisions.
+    AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
+                                             currentTrack.nextState);
+
     // Kill the particle if it left the world.
     if (!currentTrack.nextState.IsOutside()) {
 
       G4HepEmGammaManager::UpdateNumIALeft(theTrack);
-
-      AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
-                                               currentTrack.nextState);
 
       const int nextlvolID          = currentTrack.nextState.GetLogicalId();
       VolAuxData const &nextauxData = AsyncAdePT::gVolAuxData[nextlvolID];
