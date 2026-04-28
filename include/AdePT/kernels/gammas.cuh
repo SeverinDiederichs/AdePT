@@ -158,7 +158,7 @@ __global__ void __launch_bounds__(256, 1)
 
       // Complete the deferred relocation before using the state for outside or
       // logical-volume decisions.
-      AdePTNavigator::RelocateToNextVolumeByID(pos, dir, nextVolumeId, nextState);
+      AdePTNavigator::RelocateToNextVolumeByID(pos, preStepDir, nextVolumeId, nextState);
 
 #if ADEPT_DEBUG_TRACK > 0
       if (verbose) {

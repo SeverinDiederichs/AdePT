@@ -320,7 +320,7 @@ __global__ void GammaRelocation(G4HepEmGammaTrack *hepEMTracks, ParticleManager 
 
     // Complete the deferred relocation before using the state for outside or
     // logical-volume decisions.
-    AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.dir, currentTrack.nextVolumeID,
+    AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.preStepDir, currentTrack.nextVolumeID,
                                              currentTrack.nextState);
 
     // Kill the particle if it left the world.
