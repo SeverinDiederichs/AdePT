@@ -94,6 +94,7 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
     vecgeom::Vector3D<double> preStepPos(pos);
     auto dir = currentTrack.dir;
     vecgeom::Vector3D<double> preStepDir(dir);
+    vecgeom::Vector3D<double> relocationDir(dir);
     double globalTime        = currentTrack.globalTime;
     double preStepGlobalTime = currentTrack.globalTime;
     double localTime         = currentTrack.localTime;
@@ -263,7 +264,7 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
       geometryStepLength =
           fieldPropagatorRungeKutta<Field_t, RkDriver_t, rk_integration_t, AdePTNavigator>::ComputeStepAndNextVolume(
               magneticField, eKin, restMass, Charge, geometricalStepLengthFromPhysics, safeLength, pos, dir, navState,
-              nextState, nextVolumeId, propagated, /*lengthDone,*/ safety,
+              nextState, nextVolumeId, relocationDir, propagated, /*lengthDone,*/ safety,
               // activeSize < 100 ? max_iterations : max_iters_tail ), // Was
               max_iterations, iterDone, slot, zero_first_step, verbose);
       // In case of zero step detected by the field propagator this could be due to back scattering, or wrong relocation
@@ -386,7 +387,7 @@ static __device__ __forceinline__ void TransportElectrons(ParticleManager &parti
           nextState.Print();
         }
 #endif
-        AdePTNavigator::RelocateToNextVolumeByID(pos, preStepDir, nextVolumeId, nextState);
+        AdePTNavigator::RelocateToNextVolumeByID(pos, relocationDir, nextVolumeId, nextState);
 
 #if ADEPT_DEBUG_TRACK > 0
         if (verbose) {

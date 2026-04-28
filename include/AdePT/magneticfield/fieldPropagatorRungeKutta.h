@@ -34,6 +34,7 @@ public:
   /// @param[in] current_state Current geometry state
   /// @param[out] next_state Geometry state after propagation
   /// @param[out] nextvolume_id Deferred next placed-volume id
+  /// @param[out] relocation_dir Direction used to compute the deferred next volume id
   /// @param[out] propagated Checks if the step was fully propagated
   /// @param safetyIn Geometric isotropic safety
   /// @param max_iterations Maximum allowed iterations
@@ -46,8 +47,8 @@ public:
       Field_t const &magneticField, double kinE, double mass, int charge, double physicsStep, double safeLength,
       vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &direction,
       vecgeom::NavigationState const &current_state, vecgeom::NavigationState &next_state, long &nextvolume_id,
-      bool &propagated, const Real_t &safetyIn, const int max_iterations, int &iterDone, int threadId,
-      bool &zero_first_step, bool verbose = false);
+      vecgeom::Vector3D<double> &relocation_dir, bool &propagated, const Real_t &safetyIn, const int max_iterations,
+      int &iterDone, int threadId, bool &zero_first_step, bool verbose = false);
   // Move the track,
   //   updating 'position', 'direction', the next state and returning the length moved.
 
@@ -94,7 +95,8 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
     ComputeStepAndNextVolume(Field_t const &magField, double kinE, double mass, int charge, double physicsStep,
                              double safeLength, vecgeom::Vector3D<double> &position,
                              vecgeom::Vector3D<double> &direction, vecgeom::NavigationState const &current_state,
-                             vecgeom::NavigationState &next_state, long &nextvolume_id, bool &propagated,
+                             vecgeom::NavigationState &next_state, long &nextvolume_id,
+                             vecgeom::Vector3D<double> &relocation_dir, bool &propagated,
                              const Real_t &safetyIn, //  eventually In/Out ?
                              const int max_iterations,
                              int &itersDone, //  useful for now - to monitor and report -- unclear if needed later
@@ -103,6 +105,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
   double stepDone = 0.0;         ///< step already done
   Real_t remains  = physicsStep; ///< remainder of the step to be done
   zero_first_step = false;
+  relocation_dir  = direction;
   constexpr bool inZeroFieldRegion =
       false; // This could be a per-region flag ... - better depend on template parameter?
   if (inZeroFieldRegion) {
@@ -216,6 +219,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
 
         move = Navigator_t::ComputeStepAndNextVolumeId(position, chordDir, chordLen, current_state, next_state,
                                                        nextvolume_id, kDistCheckPush);
+        if (next_state.IsOnBoundary()) relocation_dir = chordDir;
       }
     }
 
@@ -244,6 +248,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
       // Deal with back-scattered tracks that need to be relocated. Check distance along initial direction.
       move = Navigator_t::ComputeStepAndNextVolumeId(position, direction, remains, current_state, next_state,
                                                      nextvolume_id, kDistCheckPush);
+      if (next_state.IsOnBoundary()) relocation_dir = direction;
 
       if (move <= kDistCheckPush) {
 #if ADEPT_DEBUG_TRACK > 0

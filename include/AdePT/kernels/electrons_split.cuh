@@ -82,6 +82,7 @@ __global__ void ElectronHowFar(ParticleManager particleManager, G4HepEmElectronT
     currentTrack.preStepGlobalTime = currentTrack.globalTime;
     currentTrack.preStepPos        = currentTrack.pos;
     currentTrack.preStepDir        = currentTrack.dir;
+    currentTrack.relocationDir     = currentTrack.dir;
     currentTrack.stepCounter++;
     bool printErrors = false;
 
@@ -323,8 +324,9 @@ __global__ void ElectronPropagation(Track *electronsOrPositrons, G4HepEmElectron
     G4HepEmRandomEngine rnge(&currentTrack.rngState);
 
     // Check if there's a volume boundary in between.
-    currentTrack.propagated   = true;
-    currentTrack.nextVolumeID = -1;
+    currentTrack.propagated    = true;
+    currentTrack.nextVolumeID  = -1;
+    currentTrack.relocationDir = currentTrack.dir;
     double geometryStepLength;
     bool zero_first_step = false;
 
@@ -334,7 +336,7 @@ __global__ void ElectronPropagation(Track *electronsOrPositrons, G4HepEmElectron
           fieldPropagatorRungeKutta<Field_t, RkDriver_t, rk_integration_t, AdePTNavigator>::ComputeStepAndNextVolume(
               magneticField, currentTrack.eKin, restMass, Charge, theTrack->GetGStepLength(), currentTrack.safeLength,
               currentTrack.pos, currentTrack.dir, currentTrack.navState, currentTrack.nextState,
-              currentTrack.nextVolumeID, currentTrack.propagated,
+              currentTrack.nextVolumeID, currentTrack.relocationDir, currentTrack.propagated,
               /*lengthDone,*/ currentTrack.safety,
               // activeSize < 100 ? max_iterations : max_iters_tail ), // Was
               max_iterations, iterDone, slot, zero_first_step);
@@ -636,7 +638,7 @@ __global__ void ElectronRelocation(G4HepEmElectronTrack *hepEMTracks, ParticleMa
     // Mark the particle. We need to change its navigation state to the next volume before enqueuing it
     // This will happen after recording the step.
     cross_boundary = true;
-    AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.preStepDir, currentTrack.nextVolumeID,
+    AdePTNavigator::RelocateToNextVolumeByID(currentTrack.pos, currentTrack.relocationDir, currentTrack.nextVolumeID,
                                              currentTrack.nextState);
     if (currentTrack.nextState.IsOutside()) {
       // Particle left the world after the deferred relocation, don't enqueue it and release the slot

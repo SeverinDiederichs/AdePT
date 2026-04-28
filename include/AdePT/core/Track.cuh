@@ -47,6 +47,7 @@ struct Track {
   vecgeom::NavigationState nextState;
   vecgeom::Vector3D<double> preStepPos;
   vecgeom::Vector3D<double> preStepDir;
+  vecgeom::Vector3D<double> relocationDir;
   double preStepEKin{0};
   double preStepGlobalTime{0.};
   // Variables used to store navigation results
