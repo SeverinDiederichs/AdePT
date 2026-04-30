@@ -65,6 +65,7 @@ __global__ void __launch_bounds__(256, 1)
     currentTrack.preStepGlobalTime = currentTrack.globalTime;
     currentTrack.preStepPos        = currentTrack.pos;
     currentTrack.preStepDir        = currentTrack.dir;
+    currentTrack.nextVolumeID      = -1;
     currentTrack.stepCounter++;
 
     bool leftWDTRegion = false;
@@ -327,6 +328,9 @@ __global__ void __launch_bounds__(256, 1)
       currentTrack.nextState = rootState;
       AdePTNavigator::LocatePointInNavState(localpoint + wdtStepLength * localdir, currentTrack.nextState,
                                             /*top=*/false);
+      // A WDT material-sampling point is not a transportation boundary, even
+      // if it lies exactly on an internal daughter surface.
+      currentTrack.nextState.SetBoundaryState(false);
 
       const int actualLvolID          = currentTrack.nextState.GetLogicalId();
       const VolAuxData &actualAuxData = gVolAuxData[actualLvolID];

@@ -232,6 +232,9 @@ __global__ void __launch_bounds__(256, 1)
       wdtNavState.Clear();
       wdtNavState = rootState;
       AdePTNavigator::LocatePointInNavState(localpoint + wdtStepLength * localdir, wdtNavState, /*top=*/false);
+      // A WDT material-sampling point is not a transportation boundary, even
+      // if it lies exactly on an internal daughter surface.
+      wdtNavState.SetBoundaryState(false);
 
       const int actualLvolID          = wdtNavState.GetLogicalId();
       const VolAuxData &actualAuxData = gVolAuxData[actualLvolID];
