@@ -47,15 +47,18 @@ The iteration range is half-open: `[start, stop)`. For example,
 iterations 50 through 149. Invalid or negative values are ignored and treated as
 the default `0`.
 
-Run `nsys` with the CUDA profiler API capture range:
+For profiling longer, multithreaded runs, such as hundreds of ttbar events, the CUDA-event tracing needs to be disabled, as it was observed create stalls in `cudaEventRecord`. Furthermore, writing periodically the buffered CUDA trace data can help with memory issues. This can be done with the following options:
 
 ```console
 nsys profile --capture-range=cudaProfilerApi --capture-range-end=stop \
-  --trace=cuda,nvtx --sample=none --cpuctxsw=none \
+  --trace=cuda,nvtx --cuda-event-trace=false --cuda-flush-interval=10000 \
+  --sample=none --cpuctxsw=none \
   --stats=true --export=sqlite --force-overwrite=true \
   --output adept_transport_profile \
   <application command>
 ```
+
+Note that older Nsight Systems versions do not support the options `cuda-event-trace` and `cuda-flush-interval`. In that case, it is advised to use a more recent Nsight Systems version (tested with 2025.5.2).
 
 Open the report with:
 
