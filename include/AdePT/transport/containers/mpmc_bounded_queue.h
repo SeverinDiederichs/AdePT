@@ -10,13 +10,21 @@
 
 #pragma once
 
-#include <stdint.h>
 #include <cassert>
+#include <climits>
+#include <stdint.h>
 #include <AdePT/transport/containers/Atomic.h>
 #include <AdePT/transport/containers/VariableSizeObj.h>
 
 namespace adept {
 namespace internal {
+
+/** @brief Whether a capacity can be represented by the bounded queue implementation. */
+__host__ __device__ constexpr bool IsValidBoundedQueueCapacity(size_t capacity)
+{
+  return capacity >= 2 && capacity <= static_cast<size_t>(INT_MAX) && (capacity & (capacity - 1)) == 0;
+}
+
 /** @brief Internal data structure to handle the data sequence */
 template <typename Type>
 struct Cell_t {
@@ -54,6 +62,12 @@ private:
 
   __host__ __device__ __forceinline__ const ArrayData_t &GetVariableData() const { return fBuffer; }
 
+  /** @brief Reject capacities that cannot satisfy the queue indexing invariants. */
+  __host__ __device__ static constexpr bool IsValidSize(size_t nvalues)
+  {
+    return internal::IsValidBoundedQueueCapacity(nvalues);
+  }
+
   // constructors and assignment operators are private
   // states have to be constructed using MakeInstance() function
 
@@ -65,26 +79,22 @@ private:
   __host__ __device__ __forceinline__ mpmc_bounded_queue(int nvalues)
       : fCapacity(nvalues), fMask(nvalues - 1), fBuffer(nvalues)
   {
-    // The queue size must be a power of 2 (for fast access)
-    assert((nvalues >= 2) && ((nvalues & (nvalues - 1)) == 0) && "buffer size has to be a power of 2");
+    // The factory performs always-on validation. Keep this assertion as a
+    // constructor-level debug check of the invariant.
+    assert(IsValidSize(nvalues) && "buffer size has to be a power of 2 and at least 2");
     for (int i = 0; i < nvalues; ++i)
       fBuffer[i].fSequence.store(i);
   }
 
-  __host__ __device__ __forceinline__ mpmc_bounded_queue(int /*nvalues*/, mpmc_bounded_queue const & /*other*/) {}
   /** @brief MPMC bounded queue copy constructor */
   __host__ __device__ __forceinline__ mpmc_bounded_queue(mpmc_bounded_queue const &other)
-      : mpmc_bounded_queue(other.fCapacity, other)
+      : fCapacity(other.fCapacity), fMask(other.fMask), fEnqueue(other.fEnqueue), fDequeue(other.fDequeue),
+        fNstored(other.fNstored), fBuffer(other.fBuffer)
   {
   }
 
-  /** @brief MPMC bounded queue copy constructor with given size */
-  __host__ __device__ __forceinline__ mpmc_bounded_queue(size_t new_size, mpmc_bounded_queue const &other)
-      : fCapacity(new_size), fMask(new_size - 1), fEnqueue(other.fEnqueue), fDequeue(other.fDequeue),
-        fNstored(other.fNstored), fBuffer(new_size, other.fBuffer)
-  {
-    assert((new_size >= 2) && ((new_size & (new_size - 1)) == 0) && "buffer size has to be a power of 2");
-  }
+  /** @brief Capacity-changing copies cannot preserve queue invariants. */
+  mpmc_bounded_queue(size_t, mpmc_bounded_queue const &) = delete;
 
   /** @brief Operator = */
   void operator=(mpmc_bounded_queue const &) = delete;
@@ -98,6 +108,30 @@ public:
   using Base_t::ReleaseInstance;
   using Base_t::SizeOf;
   using Base_t::SizeOfAlignAware;
+
+  /**
+   * @brief Copy a queue only when the requested capacity matches the source.
+   * @return A queue copy, or nullptr if changing the capacity was requested.
+   *
+   * Queue positions and per-cell sequence numbers depend on the capacity, so
+   * they cannot be preserved by a raw resized copy.
+   */
+  __host__ __device__ static mpmc_bounded_queue *MakeCopy(size_t new_size, mpmc_bounded_queue const &other)
+  {
+    if (new_size != static_cast<size_t>(other.fCapacity)) return nullptr;
+    return Base_t::MakeCopy(other);
+  }
+
+  /**
+   * @brief Copy a queue at an address only when its capacity is unchanged.
+   * @return A queue copy, or nullptr if changing the capacity was requested.
+   */
+  __host__ __device__ static mpmc_bounded_queue *MakeCopyAt(size_t new_size, mpmc_bounded_queue const &other,
+                                                            void *addr)
+  {
+    if (new_size != static_cast<size_t>(other.fCapacity)) return nullptr;
+    return Base_t::MakeCopyAt(other, addr);
+  }
 
   /** @brief Returns the size in bytes of a BlockData object with given capacity */
   __host__ __device__ __forceinline__ static size_t SizeOfInstance(int capacity) { return Base_t::SizeOf(capacity); }

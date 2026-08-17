@@ -156,7 +156,8 @@ public:
   __forceinline__ __host__ __device__ VariableSizeObj(size_t new_size, const VariableSizeObj &other)
       : fSelfAlloc(false), fN(new_size)
   {
-    if (other.fN) memcpy(GetValues(), other.GetValues(), (other.fN) * sizeof(V));
+    const Index_t numToCopy = fN < other.fN ? fN : other.fN;
+    if (numToCopy) memcpy(GetValues(), other.GetValues(), numToCopy * sizeof(V));
   }
 
   __forceinline__ __host__ __device__ V *GetValues() { return &fRealArray[0]; }
@@ -191,6 +192,9 @@ protected:
   VariableSizeObjectInterface()  = default;
   ~VariableSizeObjectInterface() = default;
 
+  /** @brief Default size validation hook. Derived containers may hide this to reject unsupported sizes. */
+  __host__ __device__ static constexpr bool IsValidSize(size_t /*nvalues*/) { return true; }
+
 public:
   // The static maker to be used to create an instance of the variable size object.
 
@@ -199,6 +203,7 @@ public:
   {
     // Make an instance of the class which allocates the node array. To be
     // released using ReleaseInstance.
+    if (!Cont::IsValidSize(nvalues)) return nullptr;
     size_t needed = SizeOf(nvalues);
     char *ptr     = new char[needed];
     if (!ptr) return 0;
@@ -214,6 +219,7 @@ public:
     // Make an instance of the class which allocates the node array. To be
     // released using ReleaseInstance. If addr is non-zero, the user promised that
     // addr contains at least that many bytes:  size_t needed = SizeOf(nvalues);
+    if (!Cont::IsValidSize(nvalues)) return nullptr;
     if (!addr) {
       return MakeInstance(nvalues, params...);
     } else {
@@ -229,7 +235,9 @@ public:
   {
     // Make a copy of the variable size array and its container.
 
-    size_t needed = SizeOf(other.GetVariableData().fN);
+    const size_t nvalues = other.GetVariableData().fN;
+    if (!Cont::IsValidSize(nvalues)) return nullptr;
+    size_t needed = SizeOf(nvalues);
     char *ptr     = new char[needed];
     if (!ptr) return 0;
     Cont *copy                         = new (ptr) Cont(other);
@@ -242,6 +250,7 @@ public:
     // Make a copy of a the variable size array and its container with
     // a new_size of the content.
 
+    if (!Cont::IsValidSize(new_size)) return nullptr;
     size_t needed = SizeOf(new_size);
     char *ptr     = new char[needed];
     if (!ptr) return 0;
@@ -254,6 +263,7 @@ public:
   __host__ __device__ static Cont *MakeCopyAt(const Cont &other, void *addr)
   {
     // Make a copy of a the variable size array and its container at the location (if indicated)
+    if (!Cont::IsValidSize(other.GetVariableData().fN)) return nullptr;
     if (addr) {
       Cont *copy                         = new (addr) Cont(other);
       copy->GetVariableData().fSelfAlloc = false;
@@ -267,6 +277,7 @@ public:
   __host__ __device__ static Cont *MakeCopyAt(size_t new_size, const Cont &other, void *addr)
   {
     // Make a copy of a the variable size array and its container at the location (if indicated)
+    if (!Cont::IsValidSize(new_size)) return nullptr;
     if (addr) {
       Cont *copy                         = new (addr) Cont(new_size, other);
       copy->GetVariableData().fSelfAlloc = false;
@@ -280,14 +291,16 @@ public:
   __host__ __device__ static void ReleaseInstance(Cont *obj)
   {
     // Releases the space allocated for the object
+    const bool selfAlloc = obj->GetVariableData().fSelfAlloc;
     obj->~Cont();
-    if (obj->GetVariableData().fSelfAlloc) delete[] (char *)obj;
+    if (selfAlloc) delete[] (char *)obj;
   }
 
   // Equivalent of sizeof function (not taking into account padding for alignment)
   __host__ __device__ static constexpr size_t SizeOf(size_t nvalues)
   {
-    return (sizeof(Cont) + Cont::SizeOfExtra(nvalues) + sizeof(V) * (nvalues - 1));
+    const size_t additionalValues = nvalues > 0 ? nvalues - 1 : 0;
+    return sizeof(Cont) + Cont::SizeOfExtra(nvalues) + sizeof(V) * additionalValues;
   }
 
   // Size of the allocated derived type data members that are also variable size

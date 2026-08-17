@@ -44,13 +44,18 @@ private:
 
   __host__ __device__ __forceinline__ const ArrayData_t &GetVariableData() const { return fData; }
 
+  /** @brief BlockData capacities must also be valid for the nested hole queue. */
+  __host__ __device__ static constexpr bool IsValidSize(size_t nvalues)
+  {
+    return internal::IsValidBoundedQueueCapacity(nvalues);
+  }
+
   // constructors and assignment operators are private
   // states have to be constructed using MakeInstance() function
   __host__ __device__ __forceinline__ BlockData(size_t nvalues) : fCapacity(nvalues), fData(nvalues)
   {
     char *address = (char *)this + Base_t::SizeOfAlignAware(nvalues) - BlockData<Type>::SizeOfExtra(nvalues);
-    fHoles        = (Queue_t *)address;
-    Queue_t::MakeInstanceAt(nvalues, address);
+    fHoles        = Queue_t::MakeInstanceAt(nvalues, address);
   }
 
   __host__ __device__ __forceinline__ BlockData(BlockData const &other) : BlockData(other.fCapacity, other) {}
@@ -59,8 +64,9 @@ private:
       : Base_t(other), fCapacity(new_size), fData(new_size, other.fData)
   {
     char *address = (char *)this + Base_t::SizeOfAlignAware(new_size) - BlockData<Type>::SizeOfExtra(new_size);
-    fHoles        = (Queue_t *)address;
-    Queue_t::MakeCopyAt(new_size, *other.fHoles, address);
+    // A BlockData copy starts undistributed. Source hole indices may not be
+    // valid for the destination capacity, so always construct a fresh queue.
+    fHoles = Queue_t::MakeInstanceAt(new_size, address);
   }
 
   __forceinline__ __host__ __device__ ~BlockData() {}
@@ -125,10 +131,10 @@ public:
   }
 
   /** @brief Number of elements currently distributed */
-  __host__ __device__ __forceinline__ int GetNused() { return fNused.load(); }
+  __host__ __device__ __forceinline__ int GetNused() const { return fNused.load(); }
 
   /** @brief Number of holes in the block */
-  __host__ __device__ __forceinline__ int GetNholes() { return fHoles->size(); }
+  __host__ __device__ __forceinline__ int GetNholes() const { return fHoles->size(); }
 
   /** @brief Check if container is fully distributed */
   __host__ __device__ __forceinline__ bool IsFull() const { return (GetNused() == fCapacity); }
