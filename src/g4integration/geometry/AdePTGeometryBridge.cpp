@@ -299,8 +299,8 @@ void AdePTGeometryBridge::CheckGeometry(G4HepEmData const *hepEmData)
 
 /// @brief Fill the auxiliary per-volume transport metadata used by AdePT.
 void AdePTGeometryBridge::InitVolAuxData(adeptint::VolAuxData *volAuxData, G4HepEmData const *hepEmData,
-                                         G4HepEmTrackingManagerSpecialized *hepEmTM, bool trackInAllRegions,
-                                         std::vector<std::string> const *gpuRegionNames,
+                                         G4HepEmTrackingManagerSpecialized *hepEmTM,
+                                         std::set<G4Region const *> const &gpuRegions,
                                          std::vector<std::string> const &deadRegionNames, adeptint::WDTHostRaw &wdtRaw)
 {
   // Note: the hepEmTM must be passed explicitly here, since this is now a stateless
@@ -311,14 +311,6 @@ void AdePTGeometryBridge::InitVolAuxData(adeptint::VolAuxData *volAuxData, G4Hep
       G4TransportationManager::GetTransportationManager()->GetNavigatorForTracking()->GetWorldVolume();
   const vecgeom::VPlacedVolume *vecgeomWorld = vecgeom::GeoManager::Instance().GetWorld();
   const int *g4tohepmcindex                  = hepEmData->fTheMatCutData->fG4MCIndexToHepEmMCIndex;
-
-  // We need to go from region names to G4Region objects.
-  std::vector<G4Region *> gpuRegions{};
-  if (!trackInAllRegions) {
-    for (const std::string &regionName : *gpuRegionNames) {
-      gpuRegions.push_back(G4RegionStore::GetInstance()->GetRegion(regionName));
-    }
-  }
 
 #if defined(ADEPT_STEPACTION_TYPE) && (ADEPT_STEPACTION_TYPE == 1)
   // CMS stepping action: resolve configured dead-region names once on the host.
@@ -370,13 +362,7 @@ void AdePTGeometryBridge::InitVolAuxData(adeptint::VolAuxData *volAuxData, G4Hep
     }
 
     // Check if the volume belongs to a GPU region.
-    if (!trackInAllRegions) {
-      for (G4Region *gpuRegion : gpuRegions) {
-        if (g4_lvol->GetRegion() == gpuRegion) {
-          volAuxData[vg_lvol->id()].fGPUregionId = g4_lvol->GetRegion()->GetInstanceID();
-        }
-      }
-    } else {
+    if (gpuRegions.find(g4_lvol->GetRegion()) != gpuRegions.end()) {
       volAuxData[vg_lvol->id()].fGPUregionId = g4_lvol->GetRegion()->GetInstanceID();
     }
 

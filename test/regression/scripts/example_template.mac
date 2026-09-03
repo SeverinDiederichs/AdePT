@@ -24,9 +24,10 @@
 /adept/setCUDAStackLimit 8192
 $finish_last_n_particles_on_cpu
 
-# If true, particles are transported on the GPU across the whole geometry, GPU regions are ignored
+# Track on the GPU everywhere except in removed regions
 /adept/setTrackInAllRegions $track_in_all_regions
 $regions
+$removed_regions
 
 # Woodcock tracking regions
 $wdt_regions

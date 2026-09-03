@@ -27,7 +27,7 @@ private:
 };
 } // namespace
 
-TEST(AdePTConfiguration, IdleReturnStepCommandsFreezeWithTransportSnapshot)
+TEST(AdePTConfiguration, RejectsChangesAfterInitializationStarts)
 {
   AdePTConfiguration configuration;
   auto *stateManager = G4StateManager::GetStateManager();
@@ -37,6 +37,9 @@ TEST(AdePTConfiguration, IdleReturnStepCommandsFreezeWithTransportSnapshot)
   auto *uiManager = G4UImanager::GetUIpointer();
   ASSERT_NE(uiManager->GetTree()->FindPath("/adept/returnFirstAndLastStep"), nullptr);
   ASSERT_NE(uiManager->GetTree()->FindPath("/adept/returnAllSteps"), nullptr);
+  ASSERT_NE(uiManager->GetTree()->FindPath("/adept/setTrackInAllRegions"), nullptr);
+  ASSERT_NE(uiManager->GetTree()->FindPath("/adept/addGPURegion"), nullptr);
+  ASSERT_NE(uiManager->GetTree()->FindPath("/adept/removeGPURegion"), nullptr);
   auto *returnFirstAndLast = uiManager->GetTree()->FindPath("/adept/returnFirstAndLastStep");
   auto *returnAll          = uiManager->GetTree()->FindPath("/adept/returnAllSteps");
   EXPECT_TRUE(returnFirstAndLast->ToBeBroadcasted());
@@ -60,16 +63,33 @@ TEST(AdePTConfiguration, IdleReturnStepCommandsFreezeWithTransportSnapshot)
   EXPECT_EQ(uiManager->ApplyCommand("/adept/returnAllSteps true"), 0);
   EXPECT_TRUE(configuration.GetReturnFirstAndLastStep());
   EXPECT_TRUE(configuration.GetReturnAllSteps());
+  EXPECT_EQ(uiManager->ApplyCommand("/adept/setTrackInAllRegions true"), 0);
+  EXPECT_EQ(uiManager->ApplyCommand("/adept/addGPURegion GPUBeforeInitialization"), 0);
+  EXPECT_EQ(uiManager->ApplyCommand("/adept/removeGPURegion CPUBeforeInitialization"), 0);
+  EXPECT_TRUE(configuration.GetTrackInAllRegions());
+  ASSERT_EQ(configuration.GetGPURegionNames()->size(), 1u);
+  ASSERT_EQ(configuration.GetCPURegionNames()->size(), 1u);
 
-  // This is the point at which AdePTTransport takes its by-value kernel-option
-  // snapshot. Later Idle commands may repeat, but must not change, the values.
-  configuration.LockReturnStepOptions();
-  EXPECT_TRUE(configuration.ReturnStepOptionsAreLocked());
+  // Lock the settings as the first worker does. Repeating a value is allowed,
+  // but changing it must fail.
+  configuration.LockTransportInitializationOptions();
+  EXPECT_TRUE(configuration.TransportInitializationOptionsAreLocked());
   EXPECT_EQ(uiManager->ApplyCommand("/adept/returnFirstAndLastStep true"), 0);
   EXPECT_EQ(uiManager->ApplyCommand("/adept/returnAllSteps true"), 0);
+  EXPECT_EQ(uiManager->ApplyCommand("/adept/setTrackInAllRegions true"), 0);
+  EXPECT_EQ(uiManager->ApplyCommand("/adept/addGPURegion GPUBeforeInitialization"), 0);
+  EXPECT_EQ(uiManager->ApplyCommand("/adept/removeGPURegion CPUBeforeInitialization"), 0);
   EXPECT_NE(uiManager->ApplyCommand("/adept/returnFirstAndLastStep false"), 0);
   EXPECT_NE(uiManager->ApplyCommand("/adept/returnAllSteps false"), 0);
+  EXPECT_NE(uiManager->ApplyCommand("/adept/setTrackInAllRegions false"), 0);
+  EXPECT_NE(uiManager->ApplyCommand("/adept/addGPURegion GPUAfterInitialization"), 0);
+  EXPECT_NE(uiManager->ApplyCommand("/adept/removeGPURegion CPUAfterInitialization"), 0);
 
   EXPECT_TRUE(configuration.GetReturnFirstAndLastStep());
   EXPECT_TRUE(configuration.GetReturnAllSteps());
+  EXPECT_TRUE(configuration.GetTrackInAllRegions());
+  EXPECT_EQ(configuration.GetGPURegionNames()->size(), 1u);
+  EXPECT_EQ(configuration.GetCPURegionNames()->size(), 1u);
+  EXPECT_EQ(configuration.GetGPURegionNames()->front(), "GPUBeforeInitialization");
+  EXPECT_EQ(configuration.GetCPURegionNames()->front(), "CPUBeforeInitialization");
 }
