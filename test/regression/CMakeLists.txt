@@ -133,6 +133,26 @@ add_test(NAME test_UI_commands
 )
 set_tests_properties(test_UI_commands PROPERTIES LABELS "unit")
 
+# A track starting in a removed region must stay on the CPU. SpeedOfLight kills
+# tracks sent to AdePT, so the track must stay on the CPU to deposit any energy.
+add_test(NAME test_remove_gpu_region
+  COMMAND bash ${PROJECT_SOURCE_DIR}/test/regression/scripts/test_remove_gpu_region.sh
+  "$<TARGET_FILE:integrationTest>" "${PROJECT_SOURCE_DIR}" "${SCRIPTS_DIR}"
+  "${PROJECT_BINARY_DIR}/test_remove_gpu_region_tmp"
+  WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
+set_tests_properties(test_remove_gpu_region PROPERTIES LABELS "unit;region-routing")
+
+# testEm3.gdml has a calorimeter region and a world region. Adding only
+# caloregion must give the same result as tracking everywhere except the world.
+add_test(NAME test_gpu_region_configuration_equivalence
+  COMMAND bash ${PROJECT_SOURCE_DIR}/test/regression/scripts/test_gpu_region_configuration_equivalence.sh
+  "$<TARGET_FILE:integrationTest>" "${PROJECT_SOURCE_DIR}" "${SCRIPTS_DIR}"
+  "${PROJECT_BINARY_DIR}/test_gpu_region_configuration_equivalence_tmp"
+  WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
+set_tests_properties(test_gpu_region_configuration_equivalence PROPERTIES LABELS "unit;region-routing")
+
 set(PHYSICS_DRIFT_SCENARIOS
   default
   regions

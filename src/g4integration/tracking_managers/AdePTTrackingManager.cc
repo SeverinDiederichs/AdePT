@@ -175,9 +175,8 @@ void AdePTTrackingManager::InitializeSharedAdePTTransport()
   std::cout << "Reading in covfie file for magnetic field: " << fAdePTConfiguration->GetCovfieBfieldFile() << std::endl;
   if (fAdePTConfiguration->GetCovfieBfieldFile() == "") std::cout << "No magnetic field file provided!" << std::endl;
 #endif
-  // Prepare the complete host-side input package before constructing the
-  // shared transport. The transport constructor then performs the one-time
-  // device-side initialization from these prepared inputs.
+  fAdePTConfiguration->LockTransportInitializationOptions();
+
   const auto uniformFieldValues = fGeant4Integration.GetUniformField();
   auto adeptG4HepEmState = std::make_unique<adept::transport::AdePTG4HepEmState>(fHepEmTrackingManager->GetConfig());
 
@@ -188,21 +187,60 @@ void AdePTTrackingManager::InitializeSharedAdePTTransport()
   auto auxData = std::make_unique<adeptint::VolAuxData[]>(vecgeom::GeoManager::Instance().GetRegisteredVolumesCount());
   adeptint::WDTHostRaw wdtRaw;
   AdePTGeometryBridge::InitVolAuxData(auxData.get(), adeptG4HepEmState->GetData(), fHepEmTrackingManager.get(),
-                                      fAdePTConfiguration->GetTrackInAllRegions(),
-                                      fAdePTConfiguration->GetGPURegionNames(),
-                                      fAdePTConfiguration->GetDeadRegionNames(), wdtRaw);
+                                      fGPURegions, fAdePTConfiguration->GetDeadRegionNames(), wdtRaw);
   adeptint::WDTHostPacked wdtPacked = AdePTGeometryBridge::PackWDT(wdtRaw);
-  // The GPU worker receives the return-step kernel options by value. Freeze the
-  // corresponding UI settings before taking that snapshot so later UI
-  // commands cannot make the host configuration disagree with the worker.
-  fAdePTConfiguration->LockReturnStepOptions();
-  auto transportConfig = MakeAdePTTransportConfig(*fAdePTConfiguration);
+  auto transportConfig              = MakeAdePTTransportConfig(*fAdePTConfiguration);
 
-  // Move the fully prepared host-side package into the shared transport. The
-  // first worker creates the transport here; later workers only retrieve the
-  // already-created shared instance.
   fAdeptTransport = GetSharedAdePTTransport(transportConfig, std::move(adeptG4HepEmState), std::move(auxData),
                                             wdtPacked, uniformFieldValues);
+}
+
+void AdePTTrackingManager::InitializeGPURegions()
+{
+  if (fGPURegionsInitialized) return;
+
+  const auto &gpuRegionNames = *fAdePTConfiguration->GetGPURegionNames();
+  const auto &cpuRegionNames = *fAdePTConfiguration->GetCPURegionNames();
+  if (!fAdePTConfiguration->GetTrackInAllRegions()) {
+    // Only regions added with addGPURegion are handled by AdePT.
+    for (const std::string &regionName : gpuRegionNames) {
+      G4Region *region = G4RegionStore::GetInstance()->GetRegion(regionName);
+      if (!region) {
+        G4Exception("AdePTTrackingManager", "Invalid parameter", FatalErrorInArgument,
+                    ("Region given to /adept/addGPURegion: " + regionName + " not found\n").c_str());
+      }
+
+      for (const std::string &cpuRegionName : cpuRegionNames) {
+        if (regionName == cpuRegionName) {
+          G4Exception("AdePTTrackingManager", "Conflicting region assignment", FatalErrorInArgument,
+                      ("Region '" + regionName + "' is defined in both /adept/addGPURegion and /adept/removeGPURegion")
+                          .c_str());
+        }
+      }
+
+      G4cout << "AdePTTrackingManager: Marking " << regionName << " as a GPU Region" << G4endl;
+      fGPURegions.insert(region);
+    }
+  } else {
+    // Start with all regions, then remove the exclusions below.
+    for (G4Region *region : *G4RegionStore::GetInstance()) {
+      if (region) fGPURegions.insert(region);
+    }
+
+    for (const std::string &cpuRegionName : cpuRegionNames) {
+      G4Region *region = G4RegionStore::GetInstance()->GetRegion(cpuRegionName);
+      if (!region) {
+        G4Exception("AdePTTrackingManager", "Invalid parameter", FatalErrorInArgument,
+                    ("Region given to /adept/removeGPURegion: " + cpuRegionName + " not found\n").c_str());
+      }
+
+      G4cout << "AdePTTrackingManager: Removing " << cpuRegionName << " from GPU Regions" << G4endl;
+      fGPURegions.erase(region);
+    }
+  }
+
+  fHepEmTrackingManager->SetGPURegions(fGPURegions);
+  fGPURegionsInitialized = true;
 }
 
 void AdePTTrackingManager::InitializeAdePT()
@@ -246,6 +284,9 @@ void AdePTTrackingManager::InitializeAdePT()
     std::cout << " NUM OF THREADS ACCORDING TO G4: " << fNumThreads << std::endl;
     fAdePTConfiguration->SetNumThreads(fNumThreads);
 
+    // Build the GPU region set before creating the volume metadata.
+    InitializeGPURegions();
+
     // Load the VecGeom world using G4VG if we don't have a GDML file, VGDML otherwise
     if (fAdePTConfiguration->GetVecGeomGDML().empty()) {
       auto *tman  = G4TransportationManager::GetTransportationManager();
@@ -283,61 +324,8 @@ void AdePTTrackingManager::InitializeAdePT()
   // the first worker. The remaining workers only retrieve the shared pointer.
   fAdeptTransport = GetSharedAdePTTransport();
 
-  // Initialize the GPU region list
-  const auto &gpuRegionNames = *fAdePTConfiguration->GetGPURegionNames();
-  const auto &cpuRegionNames = *fAdePTConfiguration->GetCPURegionNames();
-  if (!fAdePTConfiguration->GetTrackInAllRegions()) {
-    // Case 1: GPU regions are explicitly listed, and CPU regions must not overlap
-    for (const std::string &regionName : gpuRegionNames) {
-      G4Region *region = G4RegionStore::GetInstance()->GetRegion(regionName);
-      if (!region) {
-        G4Exception("AdePTTrackingManager", "Invalid parameter", FatalErrorInArgument,
-                    ("Region given to /adept/addGPURegion: " + regionName + " not found\n").c_str());
-      }
-
-      // Check for conflict with CPURegionNames
-      for (const std::string &cpuRegionName : cpuRegionNames) {
-        if (regionName == cpuRegionName) {
-          G4Exception("AdePTTrackingManager", "Conflicting region assignment", FatalErrorInArgument,
-                      ("Region '" + regionName + "' is defined in both /adept/addGPURegion and /adept/removeGPURegion")
-                          .c_str());
-        }
-      }
-
-      G4cout << "AdePTTrackingManager: Marking " << regionName << " as a GPU Region" << G4endl;
-      fGPURegions.insert(region);
-    }
-
-    fHepEmTrackingManager->SetTrackInAllRegions(false);
-
-  } else if (!cpuRegionNames.empty()) {
-    // Case 2: Track everywhere except explicitly listed CPU regions
-    // First mark all regions as GPU regions
-    for (G4Region *region : *G4RegionStore::GetInstance()) {
-      if (region) {
-        fGPURegions.insert(region);
-      }
-    }
-
-    // Then remove explicitly listed CPU regions
-    for (const std::string &cpuRegionName : cpuRegionNames) {
-      G4Region *region = G4RegionStore::GetInstance()->GetRegion(cpuRegionName);
-      if (!region) {
-        G4Exception("AdePTTrackingManager", "Invalid parameter", FatalErrorInArgument,
-                    ("Region given to /adept/removeGPURegion: " + cpuRegionName + " not found\n").c_str());
-      }
-
-      G4cout << "AdePTTrackingManager: Removing " << cpuRegionName << " from GPU Regions" << G4endl;
-      fGPURegions.erase(region);
-    }
-
-    fHepEmTrackingManager->SetTrackInAllRegions(false);
-  } else {
-    // Case 3: Track everywhere, no CPU overrides
-    fHepEmTrackingManager->SetTrackInAllRegions(true);
-  }
-  // initialize special G4HepEmTrackingManager
-  fHepEmTrackingManager->SetGPURegions(fGPURegions);
+  // Populate this worker's set from the configured region names.
+  InitializeGPURegions();
   fHepEmTrackingManager->ResetFinishEventOnCPUSize(fNumThreads);
 
   fSpeedOfLight = fAdePTConfiguration->GetSpeedOfLight();
@@ -393,7 +381,7 @@ void AdePTTrackingManager::PreparePhysicsTable(const G4ParticleDefinition &part)
 
 void AdePTTrackingManager::HandOverOneTrack(G4Track *aTrack)
 {
-  if (fGPURegions.empty() && !fAdePTConfiguration->GetTrackInAllRegions()) {
+  if (fGPURegions.empty()) {
     // if no GPU regions, hand over directly to G4HepEmTrackingManager
     fHepEmTrackingManager->HandOverOneTrack(aTrack);
     if (aTrack->GetTrackStatus() != fStopAndKill) {
@@ -518,7 +506,6 @@ void AdePTTrackingManager::ProcessTrack(G4Track *aTrack)
   G4EventManager *eventManager       = G4EventManager::GetEventManager();
   G4TrackingManager *trackManager    = eventManager->GetTrackingManager();
   G4SteppingManager *steppingManager = trackManager->GetSteppingManager();
-  const bool trackInAllRegions       = fAdePTConfiguration->GetTrackInAllRegions();
   const bool callUserActions         = CallUserActions(*fAdePTConfiguration);
   const bool globalHostData =
       fAdePTConfiguration->GetReturnFirstAndLastStep() || fAdePTConfiguration->GetReturnAllSteps();
@@ -557,7 +544,7 @@ void AdePTTrackingManager::ProcessTrack(G4Track *aTrack)
     G4Region const *region = aTrack->GetNextVolume()->GetLogicalVolume()->GetRegion();
 
     // Check if the particle is in a GPU region
-    const bool isGPURegion = trackInAllRegions || fGPURegions.find(region) != fGPURegions.end();
+    const bool isGPURegion = fGPURegions.find(region) != fGPURegions.end();
 
     if (isGPURegion && (fHepEmTrackingManager->GetFinishEventOnCPU(threadId) < 0)) {
 

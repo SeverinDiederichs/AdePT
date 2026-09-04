@@ -198,12 +198,11 @@ TEST(AdePTGeometryBridge, InitVolAuxDataIncludesAllReplicatedWdtRoots)
   ASSERT_TRUE(hepEmTM.fWDTHelper->Initialize(wdtRegionNames, &matCutData, worldPV));
 
   std::vector<adeptint::VolAuxData> volAuxData(vecgeom::GeoManager::Instance().GetRegisteredVolumesCount());
-  std::vector<std::string> gpuRegionNames;
+  std::set<G4Region const *> gpuRegions{&worldRegion, &wdtRegion};
   std::vector<std::string> deadRegionNames;
   adeptint::WDTHostRaw wdtRaw;
 
-  AdePTGeometryBridge::InitVolAuxData(volAuxData.data(), &hepEmData, &hepEmTM, true, &gpuRegionNames, deadRegionNames,
-                                      wdtRaw);
+  AdePTGeometryBridge::InitVolAuxData(volAuxData.data(), &hepEmData, &hepEmTM, gpuRegions, deadRegionNames, wdtRaw);
 
   const auto regionRoots = wdtRaw.regionToRootIndices.find(wdtRegion.GetInstanceID());
   ASSERT_NE(regionRoots, wdtRaw.regionToRootIndices.end());
@@ -216,6 +215,61 @@ TEST(AdePTGeometryBridge, InitVolAuxDataIncludesAllReplicatedWdtRoots)
   for (auto const &root : wdtRaw.roots) {
     EXPECT_EQ(root.hepemIMC, 0);
   }
+}
+
+TEST(AdePTGeometryBridge, UsesResolvedGPURegionSet)
+{
+  GeometryCleanup cleanup;
+  G4GeometryManager::GetInstance()->OpenGeometry();
+  vecgeom::GeoManager::Instance().Clear();
+
+  auto *material = G4NistManager::Instance()->FindOrBuildMaterial("G4_AIR");
+  ASSERT_NE(material, nullptr);
+
+  auto *worldSolid = new G4Box("cpu_override_world_solid", 10.0 * mm, 10.0 * mm, 10.0 * mm);
+  auto *worldLV    = new G4LogicalVolume(worldSolid, material, "cpu_override_world_lv");
+  auto *worldPV = new G4PVPlacement(nullptr, G4ThreeVector(), worldLV, "cpu_override_world", nullptr, false, 0, false);
+
+  auto *cpuSolid = new G4Box("cpu_override_solid", 1.0 * mm, 1.0 * mm, 1.0 * mm);
+  auto *cpuLV    = new G4LogicalVolume(cpuSolid, material, "cpu_override_lv");
+  new G4PVPlacement(nullptr, G4ThreeVector(), cpuLV, "cpu_override", worldLV, false, 0, false);
+
+  auto *couple = new G4MaterialCutsCouple(material, new G4ProductionCuts);
+  couple->SetIndex(0);
+  couple->SetUseFlag(true);
+  worldLV->SetMaterialCutsCouple(couple);
+  cpuLV->SetMaterialCutsCouple(couple);
+
+  G4Region worldRegion("cpu_override_world_region");
+  worldRegion.AddRootLogicalVolume(worldLV);
+  worldRegion.RegisterMaterialCouplePair(material, couple);
+
+  G4Region cpuRegion("cpu_override_region");
+  cpuRegion.AddRootLogicalVolume(cpuLV);
+  cpuRegion.RegisterMaterialCouplePair(material, couple);
+
+  auto *transport = G4TransportationManager::GetTransportationManager();
+  transport->SetWorldForTracking(worldPV);
+  G4GeometryManager::GetInstance()->CloseGeometry(true);
+
+  AdePTGeometryBridge::CreateVecGeomWorld(worldPV);
+  auto const *vgWorld = vecgeom::GeoManager::Instance().GetWorld();
+  ASSERT_NE(vgWorld, nullptr);
+  ASSERT_EQ(vgWorld->GetLogicalVolume()->GetDaughters().size(), 1u);
+  auto const *vgCPUVolume = vgWorld->GetLogicalVolume()->GetDaughters()[0];
+
+  SingleMatCutHepEmData hepEmData;
+  G4HepEmTrackingManagerSpecialized hepEmTM;
+  std::set<G4Region const *> gpuRegions{&worldRegion};
+  std::vector<std::string> deadRegionNames;
+  adeptint::WDTHostRaw wdtRaw;
+  std::vector<adeptint::VolAuxData> volAuxData(vecgeom::GeoManager::Instance().GetRegisteredVolumesCount());
+
+  AdePTGeometryBridge::InitVolAuxData(volAuxData.data(), &hepEmData.hepEmData, &hepEmTM, gpuRegions, deadRegionNames,
+                                      wdtRaw);
+
+  EXPECT_EQ(volAuxData[vgWorld->GetLogicalVolume()->id()].fGPUregionId, worldRegion.GetInstanceID());
+  EXPECT_EQ(volAuxData[vgCPUVolume->GetLogicalVolume()->id()].fGPUregionId, -1);
 }
 
 // G4-to-VecGeom handoff for flattened replicas: a Geant4 history in replica
@@ -621,11 +675,11 @@ TEST(AdePTGeometryBridge, RejectsUnexpandedReplicaWithoutVecGeomCopies)
   ASSERT_TRUE(hepEmTM.fWDTHelper->Initialize(wdtRegionNames, &matCutData, worldPV));
 
   std::vector<adeptint::VolAuxData> volAuxData(vecgeom::GeoManager::Instance().GetRegisteredVolumesCount());
-  std::vector<std::string> gpuRegionNames;
+  std::set<G4Region const *> gpuRegions;
   std::vector<std::string> deadRegionNames;
   adeptint::WDTHostRaw wdtRaw;
 
-  EXPECT_THROW(AdePTGeometryBridge::InitVolAuxData(volAuxData.data(), &hepEmData, &hepEmTM, true, &gpuRegionNames,
-                                                   deadRegionNames, wdtRaw),
-               std::runtime_error);
+  EXPECT_THROW(
+      AdePTGeometryBridge::InitVolAuxData(volAuxData.data(), &hepEmData, &hepEmTM, gpuRegions, deadRegionNames, wdtRaw),
+      std::runtime_error);
 }

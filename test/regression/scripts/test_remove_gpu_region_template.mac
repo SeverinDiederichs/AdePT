@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 CERN
+# SPDX-License-Identifier: Apache-2.0
+
+# The electron starts in Layer3, which is removed from GPU tracking. SpeedOfLight
+# kills tracks sent to AdePT, so the electron only deposits energy if it starts
+# on the CPU.
+
+/run/numberOfThreads 1
+/control/verbose 0
+/run/verbose 0
+/process/verbose 0
+/tracking/verbose 0
+/event/verbose 0
+
+/detector/filename $gdml_name
+/adept/setVerbosity 0
+/adept/setMillionsOfTrackSlots 1
+/adept/setMillionsOfHitSlots 1
+/adept/setCPUCapacityFactor 2.5
+/adept/setTrackInAllRegions true
+/adept/removeGPURegion Layer3
+/adept/SpeedOfLight true
+
+/run/setCut 0.7 mm
+/run/initialize
+/eventAction/verbose 1
+
+/gun/setDefault
+/gun/particle e-
+/gun/energy 1 keV
+# Layer3 is centred at x=-180 mm; its lead absorber is centred at -182.85 mm.
+/gun/position -182.85 0 0 mm
+/gun/direction 1 0 0
+/gun/print false
+
+/run/beamOn 1

@@ -19,9 +19,6 @@ public:
   ~G4HepEmTrackingManagerSpecialized();
 
   void SetGPURegions(const std::set<G4Region const *> &gpuRegions) { fGPURegions = gpuRegions; }
-  /// @brief Set whether AdePT should transport particles across the whole geometry
-  void SetTrackInAllRegions(bool trackInAllRegions) { fTrackInAllRegions = trackInAllRegions; }
-  bool GetTrackInAllRegions() const { return fTrackInAllRegions; }
 
   // Implement HandOverTrack that returns the track if it ends up in the GPU region
   void HandOverOneTrack(G4Track *aTrack) override;
@@ -39,7 +36,6 @@ public:
   int GetFinishEventOnCPU(int threadid) const { return fFinishEventOnCPU[threadid]; }
 
 private:
-  bool fTrackInAllRegions = false;          ///< Whether the whole geometry is a GPU region
   std::set<G4Region const *> fGPURegions{}; ///< List of GPU regions
   std::vector<int> fFinishEventOnCPU;       ///< Vector over worker threads for events finished on CPU
 

@@ -74,6 +74,10 @@ private:
   /// corresponding one-time device initialization and upload.
   void InitializeSharedAdePTTransport();
 
+  /// @brief Set up the regions handled by AdePT.
+  /// In track-all mode, regions named with `removeGPURegion` are left out.
+  void InitializeGPURegions();
+
   /// @brief Drain returned GPU-step batches from transport and reconstruct the
   /// corresponding Geant4 steps on the CPU.
   /// @details
@@ -86,6 +90,7 @@ private:
   AdePTGeant4Integration fGeant4Integration;
   static inline int fNumThreads{0};
   std::set<G4Region const *> fGPURegions{};
+  bool fGPURegionsInitialized{false};
   std::shared_ptr<AdePTTransport> fAdeptTransport;
   AdePTConfiguration *const fAdePTConfiguration;
   int fVerbosity{0};

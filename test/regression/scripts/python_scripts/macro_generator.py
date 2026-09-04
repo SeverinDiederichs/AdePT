@@ -88,6 +88,15 @@ def generate_macro(template_path, output_path, args):
     region_part = "\n".join(region_part)
     macro_content = macro_content.replace("$regions", region_part)
 
+    # Add removeGPURegion commands.
+    removed_region_part = []
+    for i in args.removed_regions.split(","):
+        region = i.strip()
+        if region:
+            removed_region_part.append(f"/adept/removeGPURegion {region}")
+    removed_region_part = "\n".join(removed_region_part)
+    macro_content = macro_content.replace("$removed_regions", removed_region_part)
+
     # Woodcock tracking regions should be a comma-separated list of region names.
     wdt_region_part = []
     for i in args.wdt_regions.split(","):
@@ -136,6 +145,8 @@ def main():
     parser.add_argument("--call_user_tracking_action", default="False", help="True or False")
     parser.add_argument("--regions", type=str, required=False, default="",
                         help="Comma-separated list of regions in which to do GPU transport, only if track_in_all_regions is False")
+    parser.add_argument("--removed_regions", type=str, required=False, default="",
+                        help="Comma-separated list of regions to exclude when track_in_all_regions is True")
     parser.add_argument("--wdt_regions", type=str, required=False, default="",
                         help="Comma-separated list of Woodcock tracking regions")
     args = parser.parse_args()

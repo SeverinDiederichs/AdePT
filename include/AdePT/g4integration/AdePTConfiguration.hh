@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 class AdePTConfigurationMessenger;
@@ -19,28 +21,50 @@ public:
   AdePTConfiguration();
   ~AdePTConfiguration();
   void SetNumThreads(int numThreads) { fNumThreads = numThreads; }
-  void SetTrackInAllRegions(bool trackInAllRegions) { fTrackInAllRegions = trackInAllRegions; }
+  bool SetTrackInAllRegions(bool trackInAllRegions)
+  {
+    if (sTransportInitializationOptionsLocked) return fTrackInAllRegions == trackInAllRegions;
+    fTrackInAllRegions = trackInAllRegions;
+    return true;
+  }
   void SetCallUserActions(bool callUserActions) { fCallUserActions = callUserActions; }
   void SetCallUserSteppingAction(bool callUserSteppingAction) { fCallUserSteppingAction = callUserSteppingAction; }
   void SetCallUserTrackingAction(bool callUserTrackingAction) { fCallUserTrackingAction = callUserTrackingAction; }
   bool SetReturnAllSteps(bool returnAllSteps)
   {
-    if (sReturnStepOptionsLocked) return fReturnAllSteps == returnAllSteps;
+    if (sTransportInitializationOptionsLocked) return fReturnAllSteps == returnAllSteps;
     fReturnAllSteps = returnAllSteps;
     return true;
   }
   bool SetReturnFirstAndLastStep(bool returnFirstAndLastStep)
   {
-    if (sReturnStepOptionsLocked) {
+    if (sTransportInitializationOptionsLocked) {
       return fReturnFirstAndLastStep == returnFirstAndLastStep;
     }
     fReturnFirstAndLastStep = returnFirstAndLastStep;
     return true;
   }
-  void LockReturnStepOptions() { sReturnStepOptionsLocked = true; }
-  bool ReturnStepOptionsAreLocked() const { return sReturnStepOptionsLocked; }
-  void AddGPURegionName(std::string name) { fGPURegionNames.push_back(name); }
-  void RemoveGPURegionName(std::string name) { fCPURegionNames.push_back(name); }
+  void LockTransportInitializationOptions() { sTransportInitializationOptionsLocked = true; }
+  bool TransportInitializationOptionsAreLocked() const { return sTransportInitializationOptionsLocked; }
+  // Keep the old names for source compatibility.
+  void LockReturnStepOptions() { LockTransportInitializationOptions(); }
+  bool ReturnStepOptionsAreLocked() const { return TransportInitializationOptionsAreLocked(); }
+  bool AddGPURegionName(std::string name)
+  {
+    if (sTransportInitializationOptionsLocked) {
+      return std::find(fGPURegionNames.begin(), fGPURegionNames.end(), name) != fGPURegionNames.end();
+    }
+    fGPURegionNames.push_back(std::move(name));
+    return true;
+  }
+  bool RemoveGPURegionName(std::string name)
+  {
+    if (sTransportInitializationOptionsLocked) {
+      return std::find(fCPURegionNames.begin(), fCPURegionNames.end(), name) != fCPURegionNames.end();
+    }
+    fCPURegionNames.push_back(std::move(name));
+    return true;
+  }
   void AddWDTRegionName(std::string name) { fWDTRegionNames.push_back(name); }
   void AddDeadRegionName(std::string name) { fDeadRegionNames.push_back(name); }
   void SetVerbosity(int verbosity) { fVerbosity = verbosity; };
@@ -117,10 +141,8 @@ private:
   bool fCallUserTrackingAction{false};
   bool fReturnAllSteps{false};
   bool fReturnFirstAndLastStep{false};
-  // AdePTTransport is shared by all Geant4 workers, so the point at which its
-  // return-step options are captured is shared as well. Geant4 applies UI
-  // commands outside worker initialization/event processing.
-  inline static bool sReturnStepOptionsLocked{false};
+  // These settings cannot change after the first worker initializes AdePT.
+  inline static bool sTransportInitializationOptionsLocked{false};
   bool fSpeedOfLight{false};
   bool fSetMultipleStepsInMSCWithTransportation{false};
   bool fSetEnergyLossFluctuation{false};

@@ -11,10 +11,12 @@
 
 #include <G4VPhysicalVolume.hh>
 
+#include <set>
 #include <string>
 #include <vector>
 
 class G4LogicalVolume;
+class G4Region;
 struct G4HepEmData;
 
 /// @brief Global bridge between Geant4 host geometry and the VecGeom world used by AdePT.
@@ -40,9 +42,9 @@ public:
   static void CheckGeometry(G4HepEmData const *hepEmData);
 
   /// @brief Fills the auxiliary per-volume data needed by AdePT.
+  /// @param gpuRegions Regions handled by AdePT.
   static void InitVolAuxData(adeptint::VolAuxData *volAuxData, G4HepEmData const *hepEmData,
-                             G4HepEmTrackingManagerSpecialized *hepEmTM, bool trackInAllRegions,
-                             std::vector<std::string> const *gpuRegionNames,
+                             G4HepEmTrackingManagerSpecialized *hepEmTM, std::set<G4Region const *> const &gpuRegions,
                              std::vector<std::string> const &deadRegionNames, adeptint::WDTHostRaw &wdtRaw);
 
   /// @brief Pack the Woodcock tracking data from the sparse host-side map into arrays that can be copied to the GPU.

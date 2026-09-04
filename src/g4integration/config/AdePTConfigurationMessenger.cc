@@ -17,12 +17,11 @@
 #include "G4Exception.hh"
 
 namespace {
-void ReportLockedReturnStepOption(G4UIcommand *command)
+void ReportLockedTransportInitializationOption(G4UIcommand *command)
 {
   G4ExceptionDescription description;
   description << command->GetCommandPath()
-              << " cannot be changed after AdePT transport initialization because the GPU worker has already "
-                 "captured this option. Configure it before the first run.";
+              << " cannot be changed after AdePT initialization has started. Set it before the first run.";
   command->CommandFailed(description);
 }
 } // namespace
@@ -184,7 +183,9 @@ void AdePTConfigurationMessenger::SetNewValue(G4UIcommand *command, G4String new
 {
 
   if (command == fSetTrackInAllRegionsCmd.get()) {
-    fAdePTConfiguration->SetTrackInAllRegions(fSetTrackInAllRegionsCmd->GetNewBoolValue(newValue));
+    if (!fAdePTConfiguration->SetTrackInAllRegions(fSetTrackInAllRegionsCmd->GetNewBoolValue(newValue))) {
+      ReportLockedTransportInitializationOption(command);
+    }
   } else if (command == fSetCallUserActionsCmd.get()) {
     fAdePTConfiguration->SetCallUserActions(fSetCallUserActionsCmd->GetNewBoolValue(newValue));
   } else if (command == fSetCallUserSteppingActionCmd.get()) {
@@ -193,11 +194,11 @@ void AdePTConfigurationMessenger::SetNewValue(G4UIcommand *command, G4String new
     fAdePTConfiguration->SetCallUserTrackingAction(fSetCallUserTrackingActionCmd->GetNewBoolValue(newValue));
   } else if (command == fSetReturnFirstAndLastStepCmd.get()) {
     if (!fAdePTConfiguration->SetReturnFirstAndLastStep(fSetReturnFirstAndLastStepCmd->GetNewBoolValue(newValue))) {
-      ReportLockedReturnStepOption(command);
+      ReportLockedTransportInitializationOption(command);
     }
   } else if (command == fSetReturnAllStepsCmd.get()) {
     if (!fAdePTConfiguration->SetReturnAllSteps(fSetReturnAllStepsCmd->GetNewBoolValue(newValue))) {
-      ReportLockedReturnStepOption(command);
+      ReportLockedTransportInitializationOption(command);
     }
   } else if (command == fSetSpeedOfLightCmd.get()) {
     fAdePTConfiguration->SetSpeedOfLight(fSetSpeedOfLightCmd->GetNewBoolValue(newValue));
@@ -207,11 +208,15 @@ void AdePTConfigurationMessenger::SetNewValue(G4UIcommand *command, G4String new
   } else if (command == fSetEnergyLossFluctuationCmd.get()) {
     fAdePTConfiguration->SetEnergyLossFluctuation(fSetEnergyLossFluctuationCmd->GetNewBoolValue(newValue));
   } else if (command == fAddRegionCmd.get()) {
-    fAdePTConfiguration->AddGPURegionName(newValue);
+    if (!fAdePTConfiguration->AddGPURegionName(newValue)) {
+      ReportLockedTransportInitializationOption(command);
+    }
   } else if (command == fAddWDTRegionCmd.get()) {
     fAdePTConfiguration->AddWDTRegionName(newValue);
   } else if (command == fRemoveRegionCmd.get()) {
-    fAdePTConfiguration->RemoveGPURegionName(newValue);
+    if (!fAdePTConfiguration->RemoveGPURegionName(newValue)) {
+      ReportLockedTransportInitializationOption(command);
+    }
   } else if (command == fSetVerbosityCmd.get()) {
     fAdePTConfiguration->SetVerbosity(fSetVerbosityCmd->GetNewIntValue(newValue));
   } else if (command == fSetMillionsOfTrackSlotsCmd.get()) {
