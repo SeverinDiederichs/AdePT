@@ -384,6 +384,8 @@ endforeach()
 
 block()
   set(CMAKE_REQUIRED_INCLUDES ${Geant4_INCLUDE_DIRS})
+  # Propagate transitive includes, such as an external CLHEP, into the feature probes.
+  set(CMAKE_REQUIRED_LIBRARIES ${_adept_geant4_libraries})
   set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
   # Check if Geant4 is supports G4VTrackingManager
   # Always available from v11.0, but experiments may backport it to earlier versions
@@ -402,6 +404,7 @@ block()
     }
     ]] AdePT_HAS_G4VTRACKINGMANAGER)
 
+  # Use a new cache key to recheck earlier probes that omitted transitive dependencies.
   # Check whether G4Track can increment the current step number by nSteps
   check_cxx_source_compiles([[
     #include "G4Track.hh"
@@ -411,8 +414,8 @@ block()
       (void)increment;
       return 0;
     }
-    ]] ADEPT_HAS_G4TRACK_NSTEP_INCREMENT)
-  if(ADEPT_HAS_G4TRACK_NSTEP_INCREMENT)
+    ]] ADEPT_HAS_G4TRACK_NSTEP_INCREMENT_WITH_DEPS)
+  if(ADEPT_HAS_G4TRACK_NSTEP_INCREMENT_WITH_DEPS)
     add_compile_definitions(ADEPT_HAS_G4TRACK_NSTEP_INCREMENT)
   endif()
 endblock()
