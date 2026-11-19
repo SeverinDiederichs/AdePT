@@ -61,6 +61,9 @@ public:
   // maximal relative error tolerance. Here in AdePT, we don't use an absolute error tolerance but only define the
   // maximum relative error tolerance that is then used all the time.
   static constexpr Real_t fMinimumStep = 0.01 * copcore::units::millimeter;
+  // Longest single RK trial. The error estimate only sees the field at the stage points of a trial, so a very long
+  // trial could step over a narrow field feature; longer advances are split into several trials.
+  static constexpr Real_t fMaximumStep = 250.0 * copcore::units::millimeter;
   static constexpr Real_t kSmall       = 1.0e-30; //  amount to add to vector magnitude to avoid div by zero
 
   // Auxiliary methods
@@ -120,6 +123,7 @@ inline __host__ __device__ Real_t RkIntegrationDriver<Stepper_t, Real_t, Int_t, 
   do {
     Real_t hnext;
 
+    htry     = vecCore::Min(htry, Real_t(fMaximumStep));
     goodStep = IntegrateStep(yStart, dydx, chargeInt, stepAdvance, htry, magField, yEnd, dydx_next, hnext);
 
     allFailed = allFailed && !goodStep;

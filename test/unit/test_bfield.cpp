@@ -473,6 +473,62 @@ void CheckZeroFieldStraightLine()
   ExpectVectorNear(momentum.Unit(), startDirection, std::is_same_v<Real_t, float> ? 2.0e-7 : 1.0e-14);
 }
 
+namespace {
+// Real Dormand-Prince stepper that records the length of every RK trial.
+struct TrialRecordingStepper {
+  using Equation                             = MagneticFieldEquation<UniformMagneticField>;
+  using Actual                               = DormandPrinceRK45<Equation, UniformMagneticField, kNvar, double>;
+  static constexpr unsigned int kMethodOrder = Actual::kMethodOrder;
+  inline static std::vector<double> trials;
+
+  static void StepWithErrorEstimate(const UniformMagneticField &field, const double *yStart, const double *dydx,
+                                    int charge, double htry, double *yEnd, double *yErr, double *nextDydx)
+  {
+    trials.push_back(htry);
+    Actual::StepWithErrorEstimate(field, yStart, dydx, charge, htry, yEnd, yErr, nextDydx);
+  }
+};
+} // namespace
+
+// A long advance is split into RK trials of at most 250 mm, so that the field is sampled along the whole arc, and
+// still completes the requested length on the exact helix.
+TEST(RkIntegrationDriver, CapsEachTrialOfLongAdvance)
+{
+  using Field                    = UniformMagneticField;
+  using Equation                 = MagneticFieldEquation<Field>;
+  using Driver                   = RkIntegrationDriver<TrialRecordingStepper, double, int, Equation, Field>;
+  constexpr int charge           = -1;
+  const double requested         = 1000.0 * copcore::units::millimeter;
+  const double momentumMagnitude = 100000.0 * copcore::units::MeV;
+  const vecgeom::Vector3D<double> startPosition{0.25, -0.5, 1.0};
+  const auto startDirection = vecgeom::Vector3D<double>{0.2, -0.4, 0.9}.Unit();
+
+  for (const float bz : {0.0f, float(3.8 * copcore::units::tesla)}) {
+    SCOPED_TRACE(bz);
+    const Field field(vecgeom::Vector3D<float>{0.0f, 0.0f, bz});
+    vecgeom::Vector3D<double> expectedPosition  = startPosition + requested * startDirection;
+    vecgeom::Vector3D<double> expectedDirection = startDirection;
+    if (bz != 0.0f) {
+      ConstFieldHelixStepper(vecgeom::Vector3D<double>{0.0, 0.0, double(bz)})
+          .DoStep(startPosition, startDirection, charge, momentumMagnitude, requested, expectedPosition,
+                  expectedDirection);
+    }
+    TrialRecordingStepper::trials.clear();
+    auto position            = startPosition;
+    auto momentum            = momentumMagnitude * startDirection;
+    double derivative[kNvar] = {};
+    double lastGoodStep      = 0.0;
+    const double advanced =
+        Driver::Advance(position, momentum, charge, requested, field, derivative, lastGoodStep, 100);
+    EXPECT_DOUBLE_EQ(advanced, requested);
+    EXPECT_GE(TrialRecordingStepper::trials.size(), 4u);
+    for (const double trial : TrialRecordingStepper::trials)
+      EXPECT_LE(trial, 250.0 * copcore::units::millimeter);
+    ExpectVectorNear(position, expectedPosition, 1.0e-7);
+    ExpectVectorNear(momentum.Unit(), expectedDirection.Unit(), 1.0e-10);
+  }
+}
+
 // Double-precision RK integration should collapse to straight-line transport
 // when the magnetic field is zero.
 TEST(RkIntegrationDriver, ZeroFieldIsStraightLineInDoublePrecision)
