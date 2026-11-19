@@ -363,10 +363,9 @@ TEST(ConstBzFieldStepper, MatchesGeneralHelixStepperForZField)
   }
 }
 
-// ComputeSafeLength limits each RK chord so the curved path stays within the
-// allowed sagitta error. Only momentum transverse to the magnetic field should
-// contribute to curvature; parallel momentum should not shorten the chord.
-TEST(FieldPropagatorRungeKutta, ComputesChordSafeLengthFromTransverseMomentum)
+// The predicted chord length follows the curvature of the three-dimensional trajectory,
+// |q| kB2C |p x B| / p^2, and aims at the target sagitta: L = sqrt(8 kChordTarget / curvature).
+TEST(FieldPropagatorRungeKutta, ComputesChordSafeLengthFromThreeDimensionalCurvature)
 {
   using Propagator = fieldPropagatorRungeKutta<UniformMagneticField, UnusedRkDriver, double, UnusedNavigator>;
 
@@ -376,12 +375,13 @@ TEST(FieldPropagatorRungeKutta, ComputesChordSafeLengthFromTransverseMomentum)
 
   const double safeLength = Propagator::ComputeSafeLength(momentum, field, charge);
 
-  const double bmag2                                 = field.Mag2();
-  const vecgeom::Vector3D<double> transverseMomentum = momentum - (momentum.Dot(field) / bmag2) * field;
-  const double invCurvature       = std::abs(transverseMomentum.Mag() / (fieldConstants::kB2C * charge * field.Mag()));
-  const double expectedSafeLength = std::sqrt(2.0 * fieldConstants::deltaChord * invCurvature);
-
+  const double curvature = std::abs(fieldConstants::kB2C * charge) * momentum.Cross(field).Mag() / momentum.Mag2();
+  const double expectedSafeLength = std::sqrt(8.0 * Propagator::kChordTarget / curvature);
   EXPECT_NEAR(safeLength, expectedSafeLength, 1.0e-14 * expectedSafeLength);
+
+  // A helix with |p| = 1300 and p_transverse = 500 has 2.6^2 times less curvature than the transverse circle.
+  vecgeom::Vector3D<double> transverseMomentum{300.0, 400.0, 0.0};
+  EXPECT_NEAR(safeLength / Propagator::ComputeSafeLength(transverseMomentum, field, charge), 2.6, 1.0e-13);
 }
 
 // RK driver tests. The first two are targeted regression tests for rejected

@@ -55,11 +55,30 @@ public:
   // Move the track,
   //   updating 'position', 'direction', the next state and returning the length moved.
 
-  // Calculate safety
+  /// @brief Arc length predicted for one chord from the local trajectory curvature
+  /// @details The chord of an arc with curvature k and length L has the sagitta k L^2 / 8, so the returned
+  /// length sqrt(8 kChordTarget / k) aims at the sagitta kChordTarget. The curvature can change along the arc
+  /// in a varying field, so chords outside geometry safety are checked after the integration.
+  /// @param momentumVec Momentum
+  /// @param BfieldVec Magnetic field at the current position
+  /// @param charge Particle charge
+  /// @return Predicted arc length for one chord
   static inline __host__ __device__ Real_t ComputeSafeLength(vecgeom::Vector3D<double> &momentumVec,
                                                              vecgeom::Vector3D<Real_t> &BfieldVec, int charge);
 
+  /// As in Geant4's G4ChordFinder, a chord is accepted while its distance from the curve is below deltaChord.
+  static constexpr double kChordAcceptance = fieldConstants::deltaChord;
+  /// Sagitta aimed at by the curvature prediction of an arc. It stays below kChordAcceptance, so that a moderate
+  /// curvature increase along the arc does not force a shorter retry.
+  static constexpr double kChordTarget = 0.8 * kChordAcceptance;
+
 protected:
+  /// @brief Arc length whose chord has the sagitta kChordTarget at the trajectory curvature @p curvature
+  static inline __host__ __device__ double CurvatureLimitedArc(double curvature)
+  {
+    return sqrt(8.0 * kChordTarget / (curvature + 1.0e-30));
+  }
+
   static constexpr unsigned int fMaxTrials = 100;
   static constexpr unsigned int Nvar       = 6; // For position (3) and momentum (3) -- invariant
   // Cannot change the energy (or momentum magnitude) -- currently usable only for pure magnetic fields
@@ -72,20 +91,12 @@ inline __host__ __device__ Real_t
 fieldPropagatorRungeKutta<Field_t, RkDriver_t, Real_t, Navigator_t>::ComputeSafeLength(
     vecgeom::Vector3D<double> &momentumVec, vecgeom::Vector3D<Real_t> &BfieldVec, int charge)
 {
-  Real_t bmag2                      = BfieldVec.Mag2();
-  Real_t ratioOverFld               = (bmag2 > 0) ? momentumVec.Dot(BfieldVec) / bmag2 : 0.0;
-  vecgeom::Vector3D<Real_t> PtransB = momentumVec - ratioOverFld * BfieldVec;
-
-  Real_t bmag = sqrt(bmag2);
-
-  // Real_t curv = fabs(Track::kB2C * charge * bmag / ( PtransB.Mag() + tiny));
-
-  // Calculate inverse curvature instead - save a division
-  Real_t inv_curv = fabs(PtransB.Mag() / (fieldConstants::kB2C * Real_t(charge) * bmag + 1.0e-30));
-  // acceptable lateral error from field
-  return sqrt(Real_t(2.0) * fieldConstants::deltaChord *
-              inv_curv); // max length along curve for deflection
-                         // = sqrt( 2.0 / ( invEpsD * curv) ); // Candidate for fast inv-sqrt
+  // Curvature of the three-dimensional trajectory: |dT/ds| = |q| kB2C |p x B| / p^2. The radius of the
+  // transverse projection is not the curvature radius when the momentum has a component along B.
+  const double momentumMag2 = momentumVec.Mag2();
+  const double curvature =
+      momentumMag2 > 0. ? fabs(fieldConstants::kB2C * charge) * momentumVec.Cross(BfieldVec).Mag() / momentumMag2 : 0.;
+  return Real_t(CurvatureLimitedArc(curvature));
 }
 
 // Determine the step along curved trajectory for charged particles in a field.
@@ -132,6 +143,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
   bool found_end         = false;
   bool continueIteration = false;
   bool fullChord         = false;
+  bool safetyRefreshed   = false; ///< safety was already refreshed at the current chord start
   // bool lastWasZero             = false; // Debug only ?  JA 2022.09.05
   const double inv_momentumMag = 1.0 / momentumMag;
 
@@ -166,7 +178,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
     // Note: safeArc is not limited by geometry, so after pushing we need to validate that we have not crossed
     const double safeArc = vecCore::Min(remains, maxNextSafeMove);
 
-    Real_t dydx_end[Nvar]; // not reused at the moment, but could be used for FSAL between cord integrations
+    Real_t dydx_end[Nvar]; // derivative at the arc end, used for the curvature of the next arc
                            // Integrate the step.
     Real_t arcAdvanced;
     if constexpr (std::is_same<Real_t, double>::value) {
@@ -208,19 +220,56 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
              safetyAtChordStart);
     }
 #endif
-    if (safetyAtChordStart <= chordLen && stepDone > 0) {
+    // A completed Advance integrated the requested arc. Its Real_t length differs from safeArc only by rounding,
+    // which in mixed precision can lift a safety-limited request just above the safety. Use the requested length
+    // then, so that such an arc is still recognized as contained in the safety sphere.
+    const bool arcCompleted = arcAdvanced >= Real_t(safeArc);
+    const double arcLength  = arcCompleted ? safeArc : double(arcAdvanced);
+
+    // An arc no longer than the safety stays inside the safety sphere; the numerical endpoint is checked as well.
+    if (!(arcLength <= safetyAtChordStart && chordLen < safetyAtChordStart) && stepDone > 0 && !safetyRefreshed) {
       // The reduced cached safety is not enough for this chord, so refresh the
       // cache at the current chord start before falling back to navigation.
+      // A shorter retry from the same chord start reuses the refreshed value.
       safetyAtChordStart = safetyCache.Refresh(position, Navigator_t::ComputeSafety(position, current_state, remains));
+      safetyRefreshed    = true;
 #if ADEPT_DEBUG_TRACK > 0
       if (verbose) printf("| refreshedSafety %g  ", safetyAtChordStart);
 #endif
     }
+    const bool insideSafety = arcLength <= safetyAtChordStart && chordLen < safetyAtChordStart;
+
+    // Outside geometry safety the chord replaces the arc for navigation, so the distance between them must stay
+    // below kChordAcceptance. Every point of an arc of length L lies within L/2 of one of its ends, so arcs up to
+    // twice the acceptance pass without an estimate. Otherwise, the endpoint directions give the sagitta of a
+    // circular arc with chord length c and angle phi between tangent and chord: s = c tan(phi/2) / 2, with
+    // tan(phi/2) = sin(phi) / (1 + cos(phi)). For a varying field this is an estimate, not a bound.
+    double chordDeviation = 0.;
+    if (!insideSafety && arcLength > 2. * kChordAcceptance) {
+      const double cosStart = direction.Dot(chordDir);
+      const double cosEnd   = endDirection.Dot(chordDir);
+      if (vecCore::Min(cosStart, cosEnd) <= 0.) {
+        // A tangent is at 90 degrees or more to the chord: use the L/2 bound, which exceeds the acceptance here.
+        chordDeviation = 0.5 * arcLength;
+      } else {
+        const double tanHalfStart = direction.Cross(chordDir).Mag() / (1. + cosStart);
+        const double tanHalfEnd   = endDirection.Cross(chordDir).Mag() / (1. + cosEnd);
+        chordDeviation            = 0.5 * chordLen * vecCore::Max(tanHalfStart, tanHalfEnd);
+      }
+    }
 
     double move;
-    if (safetyAtChordStart > chordLen) {
+    if (insideSafety) {
       // The move is safe
       move = chordLen;
+    } else if (chordDeviation > kChordAcceptance) {
+      // Retry a shorter arc from the same start. The sagitta grows with the square of the arc length, so aim at
+      // the target sagitta. An arc that left the safety sphere may be retried at safety length, which is safe.
+      const double reducedArc = arcLength * vecCore::Max(0.1, sqrt(kChordTarget / chordDeviation));
+      maxNextSafeMove = safetyAtChordStart < arcLength ? vecCore::Max(safetyAtChordStart, reducedArc) : reducedArc;
+      ++chordIters;
+      continueIteration = true;
+      continue;
     } else {
       // The move is not safe.
       // We need to check if the arc actually crosses any boundary along the chord and within chordLen
@@ -255,8 +304,17 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
       if (verbose) printf("| full chord advance %g ", arcAdvanced);
 #endif
 
+      // Predict the next arc from the curvature at its start: the last RK stage of a completed Advance is
+      // evaluated at the endpoint, and |dp/ds| / |p| is the curvature. A partial Advance keeps safeLength.
       // A safety-enlarged arc does not enlarge the curvature allowance for the next arc.
-      maxNextSafeMove   = vecCore::Max(safeLength, safetyCache.SafetyAt(position));
+      double nextArc = safeLength;
+      if (arcCompleted) {
+        const double dpds = sqrt(double(dydx_end[3]) * double(dydx_end[3]) + double(dydx_end[4]) * double(dydx_end[4]) +
+                                 double(dydx_end[5]) * double(dydx_end[5]));
+        nextArc           = CurvatureLimitedArc(dpds * inv_momentumMag);
+      }
+      maxNextSafeMove   = vecCore::Max(nextArc, safetyCache.SafetyAt(position));
+      safetyRefreshed   = false;
       continueIteration = true;
     } else if (stepDone == 0 && current_state.IsOnBoundary() && next_state.IsOnBoundary() &&
                move <= kBoundaryAmbiguity) {

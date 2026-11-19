@@ -24,9 +24,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <initializer_list>
+#include <utility>
 
 namespace {
 
@@ -36,6 +38,18 @@ constexpr unsigned long kDaughterNavIndex = 2;
 constexpr unsigned long kOtherNavIndex    = 3;
 
 struct DummyField {};
+
+// Fake drivers report the derivative at their endpoint as the real driver does: the propagator takes the
+// curvature of the next arc from its momentum part, |dp/ds| = curvature * |p|.
+void SetEndDerivative(double dydx[kNvar], const vecgeom::Vector3D<double> &momentum, double curvature)
+{
+  const auto direction = momentum.Unit();
+  const vecgeom::Vector3D<double> normal{-direction[1], direction[0], 0.0};
+  for (int i = 0; i < 3; ++i) {
+    dydx[i]     = direction[i];
+    dydx[3 + i] = curvature * momentum.Mag() * normal[i];
+  }
+}
 
 template <typename T>
 void ExpectVectorNear(const vecgeom::Vector3D<T> &actual, const vecgeom::Vector3D<T> &expected, double tolerance)
@@ -68,10 +82,11 @@ struct FailingPropagatorDriver {
 // momentum direction and report the full trial step as the last good step.
 struct StraightLinePropagatorDriver {
   static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
-                        const DummyField &, double[kNvar], double &lastGoodStep, unsigned int, int)
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned int, int)
   {
     position += step * momentum.Unit();
     lastGoodStep = step;
+    SetEndDerivative(dydx, momentum, 0.0);
     return step;
   }
 };
@@ -90,7 +105,7 @@ struct RecordingCircularPropagatorDriver {
   }
 
   static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
-                        const DummyField &, double[kNvar], double &lastGoodStep, unsigned int, int)
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned int, int)
   {
     if (calls < requestedSteps.size()) requestedSteps[calls] = step;
     ++calls;
@@ -100,6 +115,7 @@ struct RecordingCircularPropagatorDriver {
     position += kRadius * (std::sin(angle) * tangent + (1.0 - std::cos(angle)) * normal);
     momentum     = momentum.Mag() * (std::cos(angle) * tangent + std::sin(angle) * normal);
     lastGoodStep = step;
+    SetEndDerivative(dydx, momentum, 1.0 / kRadius);
     return step;
   }
 };
@@ -114,12 +130,13 @@ struct PartialThenCompletePropagatorDriver {
   static void Reset() { calls = 0; }
 
   static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
-                        const DummyField &, double[kNvar], double &lastGoodStep, unsigned int, int)
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned int, int)
   {
     ++calls;
     const double acceptedStep = (calls == 1) ? 2.0 : step;
     position += acceptedStep * momentum.Unit();
     lastGoodStep = acceptedStep;
+    SetEndDerivative(dydx, momentum, 0.0);
     return acceptedStep;
   }
 };
@@ -129,11 +146,12 @@ struct PartialThenCompletePropagatorDriver {
 // chord can touch one side of a tolerance surface while the transported
 // direction points somewhere else.
 struct BentChordPropagatorDriver {
-  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &, int, double step,
-                        const DummyField &, double[kNvar], double &lastGoodStep, unsigned int, int)
+  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned int, int)
   {
     position += step * vecgeom::Vector3D<double>{1.0, 0.0, -1.0e-5}.Unit();
     lastGoodStep = step;
+    SetEndDerivative(dydx, momentum, 0.0);
     return step;
   }
 };
@@ -144,12 +162,13 @@ struct BentChordPropagatorDriver {
 struct TinyBentChordPropagatorDriver {
   static constexpr double kAcceptedStep = 4.0e-8;
 
-  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &, int, double step,
-                        const DummyField &, double[kNvar], double &lastGoodStep, unsigned int, int)
+  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned int, int)
   {
     const double acceptedStep = (step < kAcceptedStep) ? step : kAcceptedStep;
     position += acceptedStep * vecgeom::Vector3D<double>{1.0, 0.0, -1.0e-5}.Unit();
     lastGoodStep = acceptedStep;
+    SetEndDerivative(dydx, momentum, 0.0);
     return acceptedStep;
   }
 };
@@ -232,17 +251,19 @@ struct FiniteSafetyNavigator {
   inline static int safetyCalls                = 0;
   inline static int stepCalls                  = 0;
   inline static double safety                  = 0.0;
+  inline static double maxRequestedChord       = 0.0;  // longest chord passed to navigation
   inline static double boundaryDistance        = -1.0; // < 0: never report a boundary
   inline static int boundaryOnCall             = -1;   // 1-based navigation call that reports it
   inline static unsigned long boundaryNavIndex = kDaughterNavIndex;
 
   static void Reset(double safetyValue, double boundaryDist, int boundaryCall)
   {
-    safetyCalls      = 0;
-    stepCalls        = 0;
-    safety           = safetyValue;
-    boundaryDistance = boundaryDist;
-    boundaryOnCall   = boundaryCall;
+    safetyCalls       = 0;
+    stepCalls         = 0;
+    safety            = safetyValue;
+    maxRequestedChord = 0.0;
+    boundaryDistance  = boundaryDist;
+    boundaryOnCall    = boundaryCall;
   }
 
   static double ComputeSafety(const vecgeom::Vector3D<double> &, const vecgeom::NavigationState &, double)
@@ -256,6 +277,7 @@ struct FiniteSafetyNavigator {
                                          vecgeom::NavigationState &nextState)
   {
     ++stepCalls;
+    maxRequestedChord = std::max(maxRequestedChord, step);
     if (stepCalls == boundaryOnCall && boundaryDistance >= 0.0 && boundaryDistance < step) {
       nextState = MakeState(boundaryNavIndex, true);
       return boundaryDistance;
@@ -433,7 +455,8 @@ TEST(FieldPropagatorRungeKuttaNavigation, UsesSafetyToAcceptFullChordWithoutNavi
 // allowance for subsequent chords. The first 10 mm arc has a 9.362 mm chord,
 // wholly inside the initial safety sphere. That safety is exhausted later.
 // Reusing its 10 mm arc length would incorrectly request the remaining 5 mm
-// in one go; the original 2 mm allowance must instead be restored.
+// in one go; the next arc must instead follow the curvature allowance at the
+// chord end, which the driver reports through its end derivative.
 TEST(FieldPropagatorRungeKuttaNavigation, DoesNotCarrySafetyEnlargedArcIntoNextChord)
 {
   using Driver     = RecordingCircularPropagatorDriver;
@@ -461,12 +484,14 @@ TEST(FieldPropagatorRungeKuttaNavigation, DoesNotCarrySafetyEnlargedArcIntoNextC
   EXPECT_TRUE(propagated);
   EXPECT_FALSE(nextState.IsOnBoundary());
   EXPECT_TRUE(nextState.HasSamePathAsOther(currentState));
+  // Arc whose chord on this circle has the target sagitta (sagitta = arc^2 / (8 radius)).
+  const double curvatureArc = std::sqrt(8.0 * Propagator::kChordTarget * Driver::kRadius);
+  ASSERT_LT(curvatureArc, physicsStep - 10.0);
   EXPECT_DOUBLE_EQ(Driver::requestedSteps[0], 10.0);
-  EXPECT_DOUBLE_EQ(Driver::requestedSteps[1], safeLength);
-  EXPECT_EQ(Driver::calls, 4u);
-  EXPECT_DOUBLE_EQ(Driver::requestedSteps[2], safeLength);
-  EXPECT_DOUBLE_EQ(Driver::requestedSteps[3], 1.0);
-  EXPECT_EQ(FiniteSafetyNavigator::stepCalls, 3);
+  EXPECT_DOUBLE_EQ(Driver::requestedSteps[1], curvatureArc);
+  EXPECT_EQ(Driver::calls, 3u);
+  EXPECT_NEAR(Driver::requestedSteps[2], physicsStep - 10.0 - curvatureArc, 1.0e-12);
+  EXPECT_EQ(FiniteSafetyNavigator::stepCalls, 2);
 
   const double angle = physicsStep / Driver::kRadius;
   ExpectVectorNear(
@@ -929,16 +954,18 @@ TEST(FieldPropagatorRungeKuttaNavigation, MixedPrecisionMultiChordAdvancesWithMo
   // the first is validated against the refreshed safety and no boundary is hit.
   FiniteSafetyNavigator::Reset(/*safetyValue=*/2.5, /*boundaryDist=*/-1.0, /*boundaryCall=*/-1);
 
-  const double physicsStep = 10.0;
+  // The first chord uses the 2 mm input allowance; later chords follow the curvature at their start
+  // (about 17 mm for R ~ 175 mm), so a 60 mm step needs several chords.
+  const double physicsStep = 60.0;
   const double moved       = Propagator::ComputeStepAndNextVolume(
       field, 100.0 * MeV, copcore::units::kElectronMassC2, -1, physicsStep, /*safeLength=*/2.0, position, direction,
       currentState, nextState, hitSurfaceIndex, propagated, safetyCache, 10, itersDone, 0, false);
 
   EXPECT_TRUE(propagated);
   EXPECT_NEAR(moved, physicsStep, 1.0e-4 * physicsStep);
-  // Several 2 mm chords were integrated, each starting from the advanced position.
+  // Several chords were integrated, each starting from the advanced position.
   EXPECT_GE(FiniteSafetyNavigator::safetyCalls, 3);
-  // With R ~ 167 mm the 10 mm arc stays close to its chord.
+  // With R ~ 175 mm the 60 mm arc stays close to its chord.
   const double displacement = (position - start).Length();
   EXPECT_LE(displacement, moved + 1.0e-6);
   EXPECT_GE(displacement, 0.97 * moved);
@@ -1023,4 +1050,420 @@ TEST(FieldPropagatorRungeKuttaNavigation, KeepsPersistentTinySameStateSeparateFr
   EXPECT_FALSE(propagated);
   EXPECT_TRUE(nextState.HasSamePathAsOther(currentState));
   EXPECT_GE(ScriptedNavigator::stepCalls, 2);
+}
+
+// ----------------------------------------------------------------------------
+// Chord check outside geometry safety: curvature prediction, acceptance and containment.
+
+namespace {
+// Counts the Advance calls of a wrapped driver, to check how often the propagator integrates.
+template <class Driver>
+struct CountingDriver {
+  inline static unsigned calls = 0;
+  template <class... Args>
+  static auto Advance(Args &&...args)
+  {
+    ++calls;
+    return Driver::Advance(std::forward<Args>(args)...);
+  }
+};
+
+// Bends on an exact circle, but reports a four times smaller curvature in its end derivative, as in a field that
+// grows along the path: every predicted arc is too long and needs a shorter retry from its start.
+struct UnderreportingCircularDriver {
+  static constexpr double kRadius = 8.0;
+  inline static unsigned calls    = 0;
+
+  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned, int)
+  {
+    ++calls;
+    const double angle = step / kRadius;
+    const auto tangent = momentum.Unit();
+    const vecgeom::Vector3D<double> normal{-tangent[1], tangent[0], 0.0};
+    position += kRadius * (std::sin(angle) * tangent + (1.0 - std::cos(angle)) * normal);
+    momentum     = momentum.Mag() * (std::cos(angle) * tangent + std::sin(angle) * normal);
+    lastGoodStep = step;
+    SetEndDerivative(dydx, momentum, 0.25 / kRadius);
+    return step;
+  }
+};
+
+// Reports the requested arc length, but its straight endpoint lies 1e-5 mm farther: a numerical endpoint error.
+struct SlightlyOvershootingDriver {
+  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned, int)
+  {
+    position += (step + 1.0e-5) * momentum.Unit();
+    lastGoodStep = step;
+    SetEndDerivative(dydx, momentum, 0.0);
+    return step;
+  }
+};
+
+// Moves exactly along +x, without normalizing a vector, so that the endpoint equals the requested length.
+struct ExactEndpointDriver {
+  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned, int)
+  {
+    position[0] += step;
+    lastGoodStep = step;
+    SetEndDerivative(dydx, momentum, 0.0);
+    return step;
+  }
+};
+
+// Overshoots its straight endpoint like SlightlyOvershootingDriver while turning the momentum by 1.5 rad per mm:
+// the chord is too curved for the acceptance although the arc length equals the safety.
+struct CurvedOvershootingDriver {
+  static constexpr double kCurvature = 1.5;
+  inline static std::array<double, 8> requested{};
+  inline static unsigned calls = 0;
+  static void Reset()
+  {
+    calls = 0;
+    requested.fill(0.0);
+  }
+
+  static double Advance(vecgeom::Vector3D<double> &position, vecgeom::Vector3D<double> &momentum, int, double step,
+                        const DummyField &, double dydx[kNvar], double &lastGoodStep, unsigned, int)
+  {
+    if (calls < requested.size()) requested[calls] = step;
+    ++calls;
+    const auto tangent = momentum.Unit();
+    const vecgeom::Vector3D<double> normal{-tangent[1], tangent[0], 0.0};
+    position += (step + 1.0e-5) * tangent;
+    const double angle = kCurvature * step;
+    momentum           = momentum.Mag() * (std::cos(angle) * tangent + std::sin(angle) * normal);
+    lastGoodStep       = step;
+    SetEndDerivative(dydx, momentum, kCurvature);
+    return step;
+  }
+};
+
+// Exact planar geometry: the current volume is x <= plane, and the safety is the distance to the plane.
+struct ContainmentPlaneNavigator {
+  static constexpr double kBoundaryPush = 1.0e-8;
+  inline static double plane            = 1.0;
+  inline static int calls               = 0;
+
+  static void Reset(double boundary)
+  {
+    plane = boundary;
+    calls = 0;
+  }
+
+  static double ComputeSafety(const vecgeom::Vector3D<double> &position, const vecgeom::NavigationState &, double)
+  {
+    return std::max(0.0, plane - position[0]);
+  }
+
+  static double ComputeStepAndNextVolume(const vecgeom::Vector3D<double> &position,
+                                         const vecgeom::Vector3D<double> &direction, double step,
+                                         const vecgeom::NavigationState &current, vecgeom::NavigationState &next)
+  {
+    ++calls;
+    current.CopyTo(&next);
+    next.SetBoundaryState(false);
+    if (direction[0] > 0.0) {
+      const double distance = (plane - position[0]) / direction[0];
+      if (distance >= 0.0 && distance <= step) {
+        next.SetNavIndex(kDaughterNavIndex);
+        next.SetBoundaryState(true);
+        return distance;
+      }
+    }
+    return step;
+  }
+
+  static double ComputeStepAndNextVolume(const vecgeom::Vector3D<double> &position,
+                                         const vecgeom::Vector3D<double> &direction, double step,
+                                         const vecgeom::NavigationState &current, vecgeom::NavigationState &next,
+                                         long &surface)
+  {
+    surface = 0;
+    return ComputeStepAndNextVolume(position, direction, step, current, next);
+  }
+};
+
+struct PropagationResult {
+  double moved;
+  bool propagated;
+  vecgeom::NavigationState next;
+};
+
+// Propagates from the origin along +x with an initial cached safety, through a fake driver and navigator.
+template <class Propagator>
+PropagationResult Propagate(vecgeom::Vector3D<double> &position, double physicsStep, double safeLength, double safety,
+                            int maxIterations = 40)
+{
+  vecgeom::Vector3D<double> direction{1.0, 0.0, 0.0};
+  const auto current = MakeState(kParentNavIndex, false);
+  PropagationResult result{0.0, false, {}};
+  long surface   = -1;
+  int iterations = 0;
+  SafetyCache safetyCache;
+  safetyCache.Refresh(position, safety);
+  result.moved = Propagator::ComputeStepAndNextVolume(DummyField{}, 10.0, 1.0, 1, physicsStep, safeLength, position,
+                                                      direction, current, result.next, surface, result.propagated,
+                                                      safetyCache, maxIterations, iterations, 0, false);
+  return result;
+}
+} // namespace
+
+// In a helix the radius of the transverse projection is not the curvature radius of the three-dimensional path.
+// The predicted arc must give the target sagitta for every pitch, checked against the analytical helix.
+TEST(FieldPropagatorRungeKuttaNavigation, SafeLengthUsesThreeDimensionalHelixCurvature)
+{
+  using Propagator = fieldPropagatorRungeKutta<DummyField, StraightLinePropagatorDriver, double, ThrowingNavigator>;
+  constexpr double momentumMagnitude = 10.0;
+  vecgeom::Vector3D<double> field{0.0, 0.0, 0.0038};
+  const double omega = std::fabs(fieldConstants::kB2C) * field.Mag() / momentumMagnitude;
+
+  for (const double pitch : {0.1, 0.5, 1.5707963267948966}) {
+    SCOPED_TRACE(pitch);
+    vecgeom::Vector3D<double> momentum{momentumMagnitude * std::sin(pitch), 0.0, momentumMagnitude * std::cos(pitch)};
+    const double length = Propagator::ComputeSafeLength(momentum, field, 1);
+    const auto helix    = [=](double arc) {
+      return vecgeom::Vector3D<double>{std::sin(pitch) * std::sin(omega * arc) / omega,
+                                       std::sin(pitch) * (1.0 - std::cos(omega * arc)) / omega, std::cos(pitch) * arc};
+    };
+    const auto chordDirection = helix(length).Unit();
+    double maximumDeviation   = 0.0;
+    for (int sample = 0; sample <= 128; ++sample) {
+      const auto point = helix(length * sample / 128.0);
+      maximumDeviation = std::max(maximumDeviation, (point - point.Dot(chordDirection) * chordDirection).Mag());
+    }
+    EXPECT_LE(maximumDeviation, Propagator::kChordTarget);
+    EXPECT_GT(maximumDeviation, 0.95 * Propagator::kChordTarget);
+  }
+  EXPECT_LT(Propagator::kChordTarget, Propagator::kChordAcceptance);
+}
+
+// Without bending (momentum along B, no field, or no charge) the predicted arc is very long but finite.
+TEST(FieldPropagatorRungeKuttaNavigation, SafeLengthRemainsFiniteForNoMagneticBending)
+{
+  using Propagator = fieldPropagatorRungeKutta<DummyField, StraightLinePropagatorDriver, double, ThrowingNavigator>;
+  vecgeom::Vector3D<double> momentum{0.0, 0.0, 10.0};
+  vecgeom::Vector3D<double> alongMomentum{0.0, 0.0, 0.0038}, noField{0.0, 0.0, 0.0}, transverse{0.0038, 0.0, 0.0};
+  for (const double length :
+       {Propagator::ComputeSafeLength(momentum, alongMomentum, 1), Propagator::ComputeSafeLength(momentum, noField, 1),
+        Propagator::ComputeSafeLength(momentum, transverse, 0)}) {
+    EXPECT_TRUE(std::isfinite(length));
+    EXPECT_GT(length, 1.0e10);
+  }
+}
+
+// Chords are accepted up to deltaChord, as in Geant4's G4ChordFinder: an exact circular chord whose sagitta lies
+// between the former 0.3 deltaChord budget and deltaChord is navigated without a retry; a larger one is shortened
+// before navigation.
+TEST(FieldPropagatorRungeKuttaNavigation, AcceptsChordsUpToDeltaChordLikeGeant4)
+{
+  using Driver     = RecordingCircularPropagatorDriver;
+  using Propagator = fieldPropagatorRungeKutta<DummyField, Driver, double, FiniteSafetyNavigator>;
+  for (const double sagittaFraction : {0.9, 1.2}) {
+    SCOPED_TRACE(sagittaFraction);
+    Driver::Reset();
+    FiniteSafetyNavigator::Reset(0.0, -1.0, -1);
+    // Arc with the sagitta L^2 / (8 R) to leading order; the exact circular sagitta is slightly smaller.
+    const double arc          = std::sqrt(8.0 * Driver::kRadius * sagittaFraction * fieldConstants::deltaChord);
+    const double exactSagitta = Driver::kRadius * (1.0 - std::cos(arc / (2.0 * Driver::kRadius)));
+    vecgeom::Vector3D<double> position{0.0, 0.0, 0.0};
+    const auto result = Propagate<Propagator>(position, arc, arc, 0.0);
+    EXPECT_NEAR(result.moved, arc, 1.0e-12);
+    EXPECT_TRUE(result.propagated);
+    if (sagittaFraction < 1.0) {
+      ASSERT_GT(exactSagitta, 0.3 * fieldConstants::deltaChord);
+      ASSERT_LT(exactSagitta, Propagator::kChordAcceptance);
+      EXPECT_EQ(Driver::calls, 1u);
+      EXPECT_EQ(FiniteSafetyNavigator::stepCalls, 1);
+    } else {
+      ASSERT_GT(exactSagitta, Propagator::kChordAcceptance);
+      EXPECT_GT(Driver::calls, static_cast<unsigned>(FiniteSafetyNavigator::stepCalls));
+      const double halfChord = 0.5 * FiniteSafetyNavigator::maxRequestedChord;
+      EXPECT_LE(Driver::kRadius - std::sqrt(Driver::kRadius * Driver::kRadius - halfChord * halfChord),
+                Propagator::kChordAcceptance);
+    }
+  }
+}
+
+// Geometry safety certifies the whole arc even when its chord would be too inaccurate for navigation: an arc no
+// longer than the safety is accepted without a retry and without navigation.
+TEST(FieldPropagatorRungeKuttaNavigation, KeepsOversizedArcInsideGeometrySafety)
+{
+  using Driver     = RecordingCircularPropagatorDriver;
+  using Propagator = fieldPropagatorRungeKutta<DummyField, Driver, double, ThrowingNavigator>;
+  Driver::Reset();
+  ThrowingNavigator::Reset();
+  constexpr double physicsStep = 5.0;
+  vecgeom::Vector3D<double> position{0.0, 0.0, 0.0};
+  const auto result = Propagate<Propagator>(position, physicsStep, physicsStep, physicsStep);
+  EXPECT_DOUBLE_EQ(result.moved, physicsStep);
+  EXPECT_TRUE(result.propagated);
+  EXPECT_EQ(Driver::calls, 1u);
+  EXPECT_EQ(ThrowingNavigator::stepCalls, 0);
+  EXPECT_GT(Driver::kRadius * (1.0 - std::cos(physicsStep / (2.0 * Driver::kRadius))), Propagator::kChordAcceptance);
+}
+
+// A numerical endpoint beyond the certified safety is navigated even though the reported arc length fits.
+TEST(FieldPropagatorRungeKuttaNavigation, NavigatesNumericalEndpointOutsideCertifiedSafety)
+{
+  using Propagator =
+      fieldPropagatorRungeKutta<DummyField, SlightlyOvershootingDriver, double, ContainmentPlaneNavigator>;
+  ContainmentPlaneNavigator::Reset(1.000005);
+  vecgeom::Vector3D<double> position{0.0, 0.0, 0.0};
+  const auto result = Propagate<Propagator>(position, 1.0, 1.0, /*safety=*/1.0, 10); // plane is 1.000005 mm away
+  EXPECT_EQ(ContainmentPlaneNavigator::calls, 1);
+  EXPECT_TRUE(result.next.IsOnBoundary());
+  EXPECT_EQ(result.next.GetNavIndex(), kDaughterNavIndex);
+  EXPECT_NEAR(position[0], 1.000005, 1.0e-14);
+  EXPECT_GT(result.moved, 0.0);
+}
+
+// The numerical endpoint must lie strictly inside the safety sphere; an endpoint exactly on it is navigated.
+TEST(FieldPropagatorRungeKuttaNavigation, NavigatesNumericalEndpointExactlyAtSafetyBoundary)
+{
+  using Propagator = fieldPropagatorRungeKutta<DummyField, ExactEndpointDriver, double, ContainmentPlaneNavigator>;
+  ContainmentPlaneNavigator::Reset(1.0);
+  vecgeom::Vector3D<double> position{0.0, 0.0, 0.0};
+  const auto result = Propagate<Propagator>(position, 1.0, 1.0, /*safety=*/1.0, 10);
+  EXPECT_EQ(ContainmentPlaneNavigator::calls, 1);
+  EXPECT_DOUBLE_EQ(position[0], 1.0);
+  EXPECT_DOUBLE_EQ(result.moved, 1.0);
+}
+
+// A too curved arc whose numerical endpoint overshoots the safety is retried shorter, inside the safety sphere,
+// instead of being navigated.
+TEST(FieldPropagatorRungeKuttaNavigation, ShortensCurvedNumericalOvershootBelowSafetyToMakeProgress)
+{
+  using Driver     = CurvedOvershootingDriver;
+  using Propagator = fieldPropagatorRungeKutta<DummyField, Driver, double, ThrowingNavigator>;
+  Driver::Reset();
+  ThrowingNavigator::Reset();
+  vecgeom::Vector3D<double> position{0.0, 0.0, 0.0};
+  const auto result = Propagate<Propagator>(position, 1.0, 1.0, /*safety=*/1.0, 2);
+  ASSERT_EQ(Driver::calls, 2u);
+  EXPECT_DOUBLE_EQ(Driver::requested[0], 1.0);
+  EXPECT_GT(Driver::requested[1], 0.0);
+  EXPECT_LT(Driver::requested[1], Driver::requested[0]);
+  EXPECT_GT(result.moved, 0.0);
+  EXPECT_LT(result.moved, 1.0);
+  EXPECT_FALSE(result.next.IsOnBoundary());
+  EXPECT_EQ(ThrowingNavigator::stepCalls, 0);
+}
+
+// A curvature retry restarts from the same chord start, so the safety refreshed for the rejected arc still holds
+// and must not be computed again.
+TEST(FieldPropagatorRungeKuttaNavigation, RefreshesSafetyOncePerChordStartAcrossCurvatureRetries)
+{
+  using Driver     = UnderreportingCircularDriver;
+  using Propagator = fieldPropagatorRungeKutta<DummyField, Driver, double, FiniteSafetyNavigator>;
+  Driver::calls    = 0;
+  FiniteSafetyNavigator::Reset(/*safetyValue=*/0.0, /*boundaryDist=*/-1.0, /*boundaryCall=*/-1);
+  constexpr double physicsStep = 12.0;
+  vecgeom::Vector3D<double> position{0.0, 0.0, 0.0};
+  const auto result = Propagate<Propagator>(position, physicsStep, /*safeLength=*/1.0, /*safety=*/0.0);
+  EXPECT_NEAR(result.moved, physicsStep, 1.0e-12);
+  EXPECT_TRUE(result.propagated);
+  // Chords after the first needed shorter retries ...
+  EXPECT_GE(FiniteSafetyNavigator::stepCalls, 3);
+  EXPECT_GE(Driver::calls, static_cast<unsigned>(FiniteSafetyNavigator::stepCalls) + 2u);
+  // ... but each chord start refreshed its safety once. The first chord starts with the caller's fresh safety.
+  EXPECT_EQ(FiniteSafetyNavigator::safetyCalls, FiniteSafetyNavigator::stepCalls - 1);
+}
+
+// The circular sagitta estimate stays exact at large turning angles, so correctly predicted arcs of low-momentum
+// electrons near boundaries are navigated without shorter retries. The first-order estimate L tan(phi) / 4
+// overestimates there.
+TEST(FieldPropagatorRungeKuttaNavigation, LowMomentumHelixChordsNeedNoRetry)
+{
+  using copcore::units::MeV;
+  using copcore::units::tesla;
+
+  using Field      = UniformMagneticField;
+  using Equation   = MagneticFieldEquation<Field>;
+  using Stepper    = DormandPrinceRK45<Equation, Field, kNvar, double>;
+  using Driver     = CountingDriver<RkIntegrationDriver<Stepper, double, int, Equation, Field>>;
+  using Propagator = fieldPropagatorRungeKutta<Field, Driver, double, FiniteSafetyNavigator>;
+
+  const Field field(vecgeom::Vector3D<float>{0.0f, 0.0f, float(3.8 * tesla)});
+  const double mass = copcore::units::kElectronMassC2;
+  for (const double kinE : {0.02 * MeV, 0.05 * MeV, 0.1 * MeV, 0.2 * MeV}) {
+    SCOPED_TRACE(kinE);
+    vecgeom::Vector3D<double> position{300.0, 0.0, 0.0};
+    vecgeom::Vector3D<double> direction = vecgeom::Vector3D<double>{1.0, 0.2, 0.0}.Unit();
+    vecgeom::Vector3D<double> momentum  = std::sqrt(kinE * (kinE + 2.0 * mass)) * direction;
+    vecgeom::Vector3D<double> fieldValue{0.0, 0.0, 3.8 * tesla};
+    const double safeLength  = Propagator::ComputeSafeLength(momentum, fieldValue, -1);
+    const double physicsStep = 4.0 * safeLength;
+    Driver::calls            = 0;
+    FiniteSafetyNavigator::Reset(0.0, -1.0, -1);
+    const auto currentState = MakeState(kParentNavIndex, false);
+    vecgeom::NavigationState nextState;
+    long hitSurfaceIndex = -1;
+    bool propagated      = false;
+    int itersDone        = 0;
+    SafetyCache safetyCache;
+    safetyCache.Refresh(position, 0.0);
+    const double moved = Propagator::ComputeStepAndNextVolume(field, kinE, mass, -1, physicsStep, safeLength, position,
+                                                              direction, currentState, nextState, hitSurfaceIndex,
+                                                              propagated, safetyCache, 20, itersDone, 0, false);
+    EXPECT_TRUE(propagated);
+    // The propagator stops once the remainder is below 1e-7 of the step.
+    EXPECT_NEAR(moved, physicsStep, 1.0e-6 * physicsStep);
+    EXPECT_EQ(Driver::calls, static_cast<unsigned>(FiniteSafetyNavigator::stepCalls));
+  }
+}
+
+// Mixed precision requests a safety-limited arc in float. When float rounds the safety up, the integrated arc is
+// one float ulp longer than the safety and must still be accepted as contained in the safety sphere. Comparing the
+// float length with the safety rejected it, and the retry requested the same rounded length again, so the track
+// made no progress for about half of all safety values.
+TEST(FieldPropagatorRungeKuttaNavigation, MixedPrecisionSafetyLimitedArcProgressesWhenFloatRoundsAboveSafety)
+{
+  using copcore::units::MeV;
+  using copcore::units::tesla;
+
+  using Field         = UniformMagneticField;
+  using AnchoredField = OffsetMagneticField<Field>;
+  using Equation      = MagneticFieldEquation<AnchoredField>;
+  using Stepper       = DormandPrinceRK45<Equation, AnchoredField, kNvar, float>;
+  using Driver        = RkIntegrationDriver<Stepper, float, int, Equation, AnchoredField>;
+  using Propagator    = fieldPropagatorRungeKutta<Field, Driver, float, FiniteSafetyNavigator>;
+
+  const Field field(vecgeom::Vector3D<float>{0.0f, 0.0f, float(3.8 * tesla)});
+  const double kinE                              = 2.0 * MeV;
+  const double mass                              = copcore::units::kElectronMassC2;
+  const vecgeom::Vector3D<double> start          = {1234.5678, -321.0987, 456.789};
+  const vecgeom::Vector3D<double> startDirection = vecgeom::Vector3D<double>{1.0, 0.2, 0.0}.Unit();
+  vecgeom::Vector3D<double> momentum             = std::sqrt(kinE * (kinE + 2.0 * mass)) * startDirection;
+  vecgeom::Vector3D<float> fieldValue{0.0f, 0.0f, float(3.8 * tesla)};
+  const double safeLength  = Propagator::ComputeSafeLength(momentum, fieldValue, -1);
+  const double physicsStep = 10.0;
+
+  int checked = 0;
+  for (int i = 0; i < 400; ++i) {
+    // Safeties well above the curvature-limited arc, so a rejected containment would request a retry.
+    const double safety = safeLength * (2.7 + 1.0e-3 * i);
+    if (!(double(float(safety)) > safety)) continue;
+    ++checked;
+    SCOPED_TRACE(safety);
+    FiniteSafetyNavigator::Reset(safety, -1.0, -1);
+    vecgeom::Vector3D<double> position  = start;
+    vecgeom::Vector3D<double> direction = startDirection;
+    const auto currentState             = MakeState(kParentNavIndex, false);
+    vecgeom::NavigationState nextState;
+    long hitSurfaceIndex = -1;
+    bool propagated      = false;
+    int itersDone        = 0;
+    SafetyCache safetyCache;
+    safetyCache.Refresh(position, safety);
+    const double moved = Propagator::ComputeStepAndNextVolume(field, kinE, mass, -1, physicsStep, safeLength, position,
+                                                              direction, currentState, nextState, hitSurfaceIndex,
+                                                              propagated, safetyCache, 10, itersDone, 0, false);
+    EXPECT_TRUE(propagated);
+    EXPECT_NEAR(moved, physicsStep, 1.0e-4 * physicsStep);
+    EXPECT_EQ(FiniteSafetyNavigator::stepCalls, 0);
+  }
+  EXPECT_GE(checked, 100);
 }
