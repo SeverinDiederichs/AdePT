@@ -33,7 +33,8 @@ public:
   /// @param mass Particle mass
   /// @param charge Particle charge
   /// @param physicsStep Step to propagate with
-  /// @param safeLength B-field safety depending only on track curvature
+  /// @param safeLength B-field safety depending only on track curvature, from ComputeSafeLength. Arcs outside the
+  /// geometry safety are kChordArcFactor times longer.
   /// @param position Particle position
   /// @param direction Particle direction
   /// @param[in] current_state Current geometry state
@@ -56,13 +57,22 @@ public:
   //   updating 'position', 'direction', the next state and returning the length moved.
 
   // Arc length over which the curved trajectory stays within fieldConstants::deltaChord of the
-  // straight line along the current direction
+  // straight line along the current direction. The arcs of ComputeStepAndNextVolume are
+  // kChordArcFactor times longer.
   static inline __host__ __device__ Real_t ComputeSafeLength(vecgeom::Vector3D<double> &momentumVec,
                                                              vecgeom::Vector3D<Real_t> &BfieldVec, int charge);
 
   /// Fraction of the longest acceptable arc that a retry requests, as fFractionNextEstimate in Geant4's
   /// G4ChordFinder.
   static constexpr double kChordRetryFraction = 0.98;
+
+  /// sqrt(3.2): length of the arcs integrated outside the geometry safety, in units of safeLength. Along an arc of
+  /// safeLength the track moves deltaChord away from its starting direction, but the chord of that arc stays within
+  /// deltaChord / 4 of the track (on a circle, s^2 / 2R against s^2 / 8R). Both distances grow with the square of the
+  /// arc length, so an arc sqrt(4 * 0.8) = sqrt(3.2) times longer has its chord 0.8 deltaChord from the track. The
+  /// chord check retries any chord at deltaChord or farther, so this margin lets the curvature grow by 25 % along a
+  /// step before a retry is needed.
+  static constexpr double kChordArcFactor = 1.7888543819998317;
 
   /// Most refinements of boundary crossings in one call. Beyond it, the crossing found on the chord is accepted, also
   /// when its estimated distance from the track is above deltaIntersection.
@@ -164,14 +174,15 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
   const double momentumMag              = sqrt(kinE * (kinE + 2.0 * mass));
   vecgeom::Vector3D<double> momentumVec = momentumMag * direction;
 
-  // The allowed safe move is normally determined by the bending accuracy.
-  // It can be enlarged by the geometric safety at the current position.
-  double maxNextSafeMove = vecCore::Max(safeLength, safetyCache.SafetyAt(position));
-  int chordIters         = 0;   ///< number of iterations for this integration
-  Real_t last_good_step  = 0.0; ///< to be reused for next cord iteration
-  bool found_end         = false;
-  bool continueIteration = false;
-  bool fullChord         = false;
+  // The allowed safe move is normally determined by the bending accuracy: an arc whose chord aims at
+  // 0.8 deltaChord. It can be enlarged by the geometric safety at the current position.
+  const double chordArcLength = kChordArcFactor * safeLength;
+  double maxNextSafeMove      = vecCore::Max(chordArcLength, safetyCache.SafetyAt(position));
+  int chordIters              = 0;   ///< number of iterations for this integration
+  Real_t last_good_step       = 0.0; ///< to be reused for next cord iteration
+  bool found_end              = false;
+  bool continueIteration      = false;
+  bool fullChord              = false;
   // bool lastWasZero             = false; // Debug only ?  JA 2022.09.05
   const double inv_momentumMag = 1.0 / momentumMag;
   bool safetyRefreshed         = false; ///< safety was already refreshed at the current chord start
@@ -327,7 +338,7 @@ inline __host__ __device__ double fieldPropagatorRungeKutta<Field_t, RkDriver_t,
 #endif
 
       // A safety-enlarged arc does not enlarge the curvature allowance for the next arc.
-      maxNextSafeMove   = vecCore::Max(safeLength, safetyCache.SafetyAt(position));
+      maxNextSafeMove   = vecCore::Max(chordArcLength, safetyCache.SafetyAt(position));
       safetyRefreshed   = false;
       continueIteration = true;
     } else if (firstChordArc > 0. && stepDone == 0 && current_state.IsOnBoundary() &&

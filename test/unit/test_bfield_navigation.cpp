@@ -349,6 +349,16 @@ struct ScriptedNavigator {
   }
 };
 
+// Outside the geometry safety, the propagator integrates arcs kChordArcFactor times the safeLength it is given. Tests
+// that are set up for arcs of a given length pass SafeLengthForArc(arc).
+constexpr double kChordArcFactor =
+    fieldPropagatorRungeKutta<DummyField, StraightLinePropagatorDriver, double, ThrowingNavigator>::kChordArcFactor;
+
+double SafeLengthForArc(double arc)
+{
+  return arc / kChordArcFactor;
+}
+
 } // namespace
 
 // Existing fieldPropagatorRungeKutta navigation contracts. These keep the RK
@@ -464,10 +474,10 @@ TEST(FieldPropagatorRungeKuttaNavigation, DoesNotCarrySafetyEnlargedArcIntoNextC
   SafetyCache safetyCache;
   safetyCache.Refresh(position, 10.0);
 
-  constexpr double safeLength  = 2.0;
+  constexpr double chordArc    = 2.0;
   constexpr double physicsStep = 15.0;
   const double moved           = Propagator::ComputeStepAndNextVolume(
-      DummyField{}, 10.0, 1.0, 1, physicsStep, safeLength, position, direction, currentState, nextState,
+      DummyField{}, 10.0, 1.0, 1, physicsStep, SafeLengthForArc(chordArc), position, direction, currentState, nextState,
       hitSurfaceIndex, propagated, safetyCache, 20, itersDone, 0, false);
 
   EXPECT_DOUBLE_EQ(moved, physicsStep);
@@ -475,9 +485,9 @@ TEST(FieldPropagatorRungeKuttaNavigation, DoesNotCarrySafetyEnlargedArcIntoNextC
   EXPECT_FALSE(nextState.IsOnBoundary());
   EXPECT_TRUE(nextState.HasSamePathAsOther(currentState));
   EXPECT_DOUBLE_EQ(Driver::requestedSteps[0], 10.0);
-  EXPECT_DOUBLE_EQ(Driver::requestedSteps[1], safeLength);
+  EXPECT_DOUBLE_EQ(Driver::requestedSteps[1], chordArc);
   EXPECT_EQ(Driver::calls, 4u);
-  EXPECT_DOUBLE_EQ(Driver::requestedSteps[2], safeLength);
+  EXPECT_DOUBLE_EQ(Driver::requestedSteps[2], chordArc);
   EXPECT_DOUBLE_EQ(Driver::requestedSteps[3], 1.0);
   EXPECT_EQ(FiniteSafetyNavigator::stepCalls, 3);
 
@@ -582,6 +592,10 @@ TEST(FieldPropagatorRungeKuttaNavigation, StopsAtNavigatorBoundaryAlongChord)
 // Chord artifact case: the chord clips a daughter boundary inside the ambiguity
 // band, but the physical-direction probe finds no boundary before the ambiguity
 // limit. The propagator must reduce the arc and stay in the current volume.
+// The bent chord lies far from its arc, so the chord check shortens the first
+// arc a few times before it is navigated. These retries count towards the
+// iteration limit of the reduced-arc retries (ReduceIters), so the first arc
+// is kept at the 1 mm this case is set up with.
 TEST(FieldPropagatorRungeKuttaNavigation, ReducesTinyChordArtifactWhenPhysicalDirectionStaysInCurrentVolume)
 {
   using Propagator = fieldPropagatorRungeKutta<DummyField, BentChordPropagatorDriver, double, ScriptedNavigator>;
@@ -602,9 +616,9 @@ TEST(FieldPropagatorRungeKuttaNavigation, ReducesTinyChordArtifactWhenPhysicalDi
       {-1.0, kParentNavIndex, false},
   });
 
-  const double moved = Propagator::ComputeStepAndNextVolume(DummyField{}, 10.0, 1.0, 1, 4.0, 1.0, position, direction,
-                                                            currentState, nextState, hitSurfaceIndex, propagated,
-                                                            safetyCache, 100, itersDone, 0, false);
+  const double moved = Propagator::ComputeStepAndNextVolume(
+      DummyField{}, 10.0, 1.0, 1, 4.0, SafeLengthForArc(1.0), position, direction, currentState, nextState,
+      hitSurfaceIndex, propagated, safetyCache, 100, itersDone, 0, false);
 
   EXPECT_GT(moved, 2.5e-8);
   EXPECT_TRUE(propagated);
@@ -944,7 +958,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, MixedPrecisionMultiChordAdvancesWithMo
 
   const double physicsStep = 10.0;
   const double moved       = Propagator::ComputeStepAndNextVolume(
-      field, 100.0 * MeV, copcore::units::kElectronMassC2, -1, physicsStep, /*safeLength=*/2.0, position, direction,
+      field, 100.0 * MeV, copcore::units::kElectronMassC2, -1, physicsStep, SafeLengthForArc(2.0), position, direction,
       currentState, nextState, hitSurfaceIndex, propagated, safetyCache, 10, itersDone, 0, false);
 
   EXPECT_TRUE(propagated);
@@ -996,7 +1010,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, MixedPrecisionChordBoundaryCrossingAtL
 
   const double physicsStep = 6.0;
   const double moved       = Propagator::ComputeStepAndNextVolume(
-      field, 100.0 * MeV, copcore::units::kElectronMassC2, -1, physicsStep, /*safeLength=*/2.0, position, direction,
+      field, 100.0 * MeV, copcore::units::kElectronMassC2, -1, physicsStep, SafeLengthForArc(2.0), position, direction,
       currentState, nextState, hitSurfaceIndex, propagated, safetyCache, 10, itersDone, 0, false);
 
   EXPECT_TRUE(propagated);
@@ -1065,6 +1079,12 @@ double CircleArcForChordDistance(double distance)
   return 2.0 * kCircleRadius * std::acos(1.0 - distance / kCircleRadius);
 }
 
+// ComputeSafeLength on that circle, sqrt(2 deltaChord R) = 2 mm.
+double CircleSafeLength()
+{
+  return std::sqrt(2.0 * fieldConstants::deltaChord * kCircleRadius);
+}
+
 struct PropagationResult {
   double moved    = 0.0;
   bool propagated = false;
@@ -1103,7 +1123,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, AcceptsChordCloserThanDeltaChordToItsA
 {
   const double arc = CircleArcForChordDistance(0.9 * fieldConstants::deltaChord);
 
-  const auto result = PropagateOnCircle(/*physicsStep=*/arc, /*safeLength=*/arc, /*cachedSafety=*/0.0,
+  const auto result = PropagateOnCircle(/*physicsStep=*/arc, SafeLengthForArc(arc), /*cachedSafety=*/0.0,
                                         /*refreshedSafety=*/0.0);
 
   EXPECT_TRUE(result.propagated);
@@ -1122,7 +1142,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, RetriesArcWhoseChordIsFartherThanDelta
   using Propagator = fieldPropagatorRungeKutta<DummyField, Driver, double, FiniteSafetyNavigator>;
   const double arc = CircleArcForChordDistance(1.5 * fieldConstants::deltaChord);
 
-  const auto result = PropagateOnCircle(/*physicsStep=*/arc, /*safeLength=*/arc, /*cachedSafety=*/0.0,
+  const auto result = PropagateOnCircle(/*physicsStep=*/arc, SafeLengthForArc(arc), /*cachedSafety=*/0.0,
                                         /*refreshedSafety=*/0.0);
 
   EXPECT_TRUE(result.propagated);
@@ -1146,7 +1166,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, RetriesTooCurvedArcAtLongerGeometrySaf
 {
   using Driver = RecordingCircularPropagatorDriver;
 
-  const auto result = PropagateOnCircle(/*physicsStep=*/6.0, /*safeLength=*/6.0, /*cachedSafety=*/4.5,
+  const auto result = PropagateOnCircle(/*physicsStep=*/6.0, SafeLengthForArc(6.0), /*cachedSafety=*/4.5,
                                         /*refreshedSafety=*/0.0);
 
   EXPECT_TRUE(result.propagated);
@@ -1167,7 +1187,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, RefreshesSafetyOncePerChordStart)
 {
   using Driver = RecordingCircularPropagatorDriver;
 
-  const auto result = PropagateOnCircle(/*physicsStep=*/16.0, /*safeLength=*/6.0, /*cachedSafety=*/10.0,
+  const auto result = PropagateOnCircle(/*physicsStep=*/16.0, SafeLengthForArc(6.0), /*cachedSafety=*/10.0,
                                         /*refreshedSafety=*/0.0);
 
   EXPECT_TRUE(result.propagated);
@@ -1431,7 +1451,7 @@ PlaneCrossingResult CrossNormalPlaneOnCircle(double s)
 {
   const double phi = s / kCircleRadius;
   const vecgeom::Vector3D<double> n{std::cos(phi), std::sin(phi), 0.0};
-  return CrossPlaneOnCircle(n, n.Dot(CirclePoint(phi)), /*safeLength=*/2.0, /*maxIterations=*/10,
+  return CrossPlaneOnCircle(n, n.Dot(CirclePoint(phi)), SafeLengthForArc(2.0), /*maxIterations=*/10,
                             /*physicsStep=*/20.0);
 }
 
@@ -1500,7 +1520,7 @@ PlaneCrossingResult CrossPlaneNextToOverlappingFace(bool startOnBoundary, double
   SafetyCache safetyCache;
   safetyCache.Refresh(result.position, 0.0);
   result.moved = Propagator::ComputeStepAndNextVolume(
-      DummyField{}, 10.0, 1.0, 1, /*physicsStep=*/10.0, /*safeLength=*/2.0, result.position, result.direction,
+      DummyField{}, 10.0, 1.0, 1, /*physicsStep=*/10.0, SafeLengthForArc(2.0), result.position, result.direction,
       currentState, result.nextState, hitSurfaceIndex, result.propagated, safetyCache, /*maxIterations=*/10, itersDone,
       0, false);
   return result;
@@ -1601,14 +1621,16 @@ TEST(FieldPropagatorRungeKuttaNavigation, TakesFirstChordAgainExactlyAsFirstInte
   // The momentum as the propagator computes it from the kinetic energy
   vecgeom::Vector3D<double> momentum   = std::sqrt(kinE * (kinE + 2.0 * mass)) * startDirection;
   vecgeom::Vector3D<double> fieldValue = field.Evaluate(start);
-  const double safeLength              = Propagator::ComputeSafeLength(momentum, fieldValue, charge);
+  // A first arc of ComputeSafeLength's length, from which the propagator computes its first arc exactly as here.
+  const double safeLength = SafeLengthForArc(Propagator::ComputeSafeLength(momentum, fieldValue, charge));
+  const double chordArc   = Propagator::kChordArcFactor * safeLength;
 
   // The first chord and the refined chord, integrated as the propagator does.
   double dydx[kNvar];
   double hint                        = 0.0;
   vecgeom::Vector3D<double> firstEnd = start;
   vecgeom::Vector3D<double> firstMom = momentum;
-  const double firstArc = UniformRkDriver::Advance(firstEnd, firstMom, charge, safeLength, field, dydx, hint, 30, 0);
+  const double firstArc = UniformRkDriver::Advance(firstEnd, firstMom, charge, chordArc, field, dydx, hint, 30, 0);
   vecgeom::Vector3D<double> refinedEnd = start;
   vecgeom::Vector3D<double> refinedMom = momentum;
   UniformRkDriver::Advance(refinedEnd, refinedMom, charge, 0.75 * firstArc, field, dydx, hint, 30, 1);
@@ -1637,7 +1659,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, TakesFirstChordAgainExactlyAsFirstInte
   SafetyCache safetyCache;
   safetyCache.Refresh(position, 0.0);
   const double moved = Propagator::ComputeStepAndNextVolume(
-      field, kinE, mass, charge, 10.0 * safeLength, safeLength, position, direction, currentState, nextState,
+      field, kinE, mass, charge, 10.0 * chordArc, safeLength, position, direction, currentState, nextState,
       hitSurfaceIndex, propagated, safetyCache, /*maxIterations=*/10, itersDone, 0, false);
 
   EXPECT_TRUE(propagated);
@@ -1658,7 +1680,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, RefinesFirstChordOfStepStartingOnBound
 {
   constexpr double planeX = 1.5;
 
-  const auto result = CrossPlaneOnCircle({1.0, 0.0, 0.0}, planeX, /*safeLength=*/2.0, /*maxIterations=*/10,
+  const auto result = CrossPlaneOnCircle({1.0, 0.0, 0.0}, planeX, SafeLengthForArc(2.0), /*maxIterations=*/10,
                                          /*physicsStep=*/10.0, /*startOnBoundary=*/true);
 
   EXPECT_TRUE(result.propagated);
@@ -1676,7 +1698,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, RefinesLaterChordsOfStepStartingOnBoun
   const double phi   = s / kCircleRadius;
   const vecgeom::Vector3D<double> n{std::cos(phi), std::sin(phi), 0.0};
 
-  const auto result = CrossPlaneOnCircle(n, n.Dot(CirclePoint(phi)), /*safeLength=*/2.0, /*maxIterations=*/10,
+  const auto result = CrossPlaneOnCircle(n, n.Dot(CirclePoint(phi)), SafeLengthForArc(2.0), /*maxIterations=*/10,
                                          /*physicsStep=*/10.0, /*startOnBoundary=*/true);
 
   EXPECT_TRUE(result.propagated);
@@ -1743,7 +1765,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, ReportsPropagatedForBoundaryReachedByZ
   safetyCache.Refresh(position, 0.0);
 
   const double moved = Propagator::ComputeStepAndNextVolume(
-      DummyField{}, 10.0, 1.0, 1, /*physicsStep=*/10.0, /*safeLength=*/2.0, position, direction, currentState,
+      DummyField{}, 10.0, 1.0, 1, /*physicsStep=*/10.0, SafeLengthForArc(2.0), position, direction, currentState,
       nextState, hitSurfaceIndex, propagated, safetyCache, /*maxIterations=*/10, itersDone, 0, false);
 
   EXPECT_EQ(Navigator::stepCalls, 2);
@@ -1758,17 +1780,17 @@ TEST(FieldPropagatorRungeKuttaNavigation, ReportsPropagatedForBoundaryReachedByZ
 // circle's direction there.
 TEST(FieldPropagatorRungeKuttaNavigation, RefinesBoundaryCrossingToDeltaIntersection)
 {
-  constexpr double planeX     = 1.5;
-  constexpr double safeLength = 2.0;
+  constexpr double planeX   = 1.5;
+  constexpr double chordArc = 2.0;
 
-  const auto result = CrossPlaneOnCircle(planeX, safeLength, /*maxIterations=*/10);
+  const auto result = CrossPlaneOnCircle(planeX, SafeLengthForArc(chordArc), /*maxIterations=*/10);
 
   const auto crossing     = CircleCrossing(planeX);
   const double crossAngle = std::asin(planeX / kCircleRadius);
   EXPECT_TRUE(result.propagated);
   EXPECT_TRUE(result.nextState.IsOnBoundary());
   EXPECT_EQ(result.nextState.GetNavIndex(), kDaughterNavIndex);
-  EXPECT_DOUBLE_EQ(RecordingCircularPropagatorDriver::requestedSteps[0], safeLength);
+  EXPECT_DOUBLE_EQ(RecordingCircularPropagatorDriver::requestedSteps[0], chordArc);
   EXPECT_GT(RecordingCircularPropagatorDriver::calls, 1u);
   EXPECT_LE(RecordingCircularPropagatorDriver::calls, 4u);
   EXPECT_NEAR(result.position[0], planeX, 1.0e-12);
@@ -1802,7 +1824,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, AcceptsUnrefinedCrossingAtIterationLim
 {
   constexpr double planeX = 1.5;
 
-  const auto result = CrossPlaneOnCircle(planeX, /*safeLength=*/2.0, /*maxIterations=*/2);
+  const auto result = CrossPlaneOnCircle(planeX, SafeLengthForArc(2.0), /*maxIterations=*/2);
 
   EXPECT_TRUE(result.propagated);
   EXPECT_TRUE(result.nextState.IsOnBoundary());
@@ -1815,23 +1837,24 @@ TEST(FieldPropagatorRungeKuttaNavigation, AcceptsUnrefinedCrossingAtIterationLim
 
 namespace {
 
-// Crosses planes along the first two chords (2 mm each), whose normals make the angle (radians) with the start
-// direction, and returns the largest distance of a crossing from the track. Every crossing ends on its plane in the
-// same call, also where a refined arc ends short of the plane and the step continues with a new chord.
-double CrossPlanesAlongFirstChords(double angle, int &crossings)
+// Crosses planes along the first two chords (chordArc each), whose normals make the angle (radians) with the start
+// direction, and returns the largest distance of a crossing from the track. Planes whose normal makes a cosine below
+// minCosIncidence with the track at the crossing are skipped. Every crossing ends on its plane in the same call, also
+// where a refined arc ends short of the plane and the step continues with a new chord.
+double CrossPlanesAlongFirstChords(double angle, double chordArc, int &crossings, double minCosIncidence = 0.25)
 {
   double worst = 0.0;
   const vecgeom::Vector3D<double> n{std::cos(angle), std::sin(angle), 0.0};
   const vecgeom::Vector3D<double> center{0.0, kCircleRadius, 0.0};
-  for (double along = 0.05; along < 3.9; along += 0.05) {
+  for (double along = 0.05; along < 2.0 * chordArc - 0.1; along += 0.05) {
     // the plane through the point of the track at the arc length 'along' from the start
     const double phi = along / kCircleRadius;
     const double d   = n.Dot(CirclePoint(phi));
     // A plane that the track meets nearly tangentially can be crossed and recrossed between the ends of one chord,
     // which then misses it, as in Geant4: deltaChord bounds that, not the refinement.
-    if (n.Dot(vecgeom::Vector3D<double>{std::cos(phi), std::sin(phi), 0.0}) < 0.25) continue;
+    if (n.Dot(vecgeom::Vector3D<double>{std::cos(phi), std::sin(phi), 0.0}) < minCosIncidence) continue;
     SCOPED_TRACE(::testing::Message() << "angle " << angle << " along " << along);
-    const auto result = CrossPlaneOnCircle(n, d, /*safeLength=*/2.0, /*maxIterations=*/10);
+    const auto result = CrossPlaneOnCircle(n, d, SafeLengthForArc(chordArc), /*maxIterations=*/10);
     ++crossings;
     EXPECT_TRUE(result.propagated);
     EXPECT_TRUE(result.nextState.IsOnBoundary());
@@ -1850,7 +1873,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, RefinedCrossingsAreWithinDeltaIntersec
   int crossings = 0;
   for (double angle : {-0.6, -0.3, 0.0, 0.3, 0.6}) {
     SCOPED_TRACE(angle);
-    EXPECT_LE(CrossPlanesAlongFirstChords(angle, crossings), fieldConstants::deltaIntersection);
+    EXPECT_LE(CrossPlanesAlongFirstChords(angle, /*chordArc=*/2.0, crossings), fieldConstants::deltaIntersection);
   }
   EXPECT_GT(crossings, 300);
 }
@@ -1863,7 +1886,7 @@ TEST(FieldPropagatorRungeKuttaNavigation, GrazingCrossingsStayOnThePlaneNearTheT
   int crossings = 0;
   for (double angle : {-1.2, -0.9, 0.9, 1.2}) {
     SCOPED_TRACE(angle);
-    EXPECT_LE(CrossPlanesAlongFirstChords(angle, crossings), fieldConstants::deltaIntersection);
+    EXPECT_LE(CrossPlanesAlongFirstChords(angle, /*chordArc=*/2.0, crossings), fieldConstants::deltaIntersection);
   }
   EXPECT_GT(crossings, 100);
 }
@@ -1929,4 +1952,71 @@ TEST(FieldPropagatorRungeKuttaNavigation, LimitsCrossingRefinementsPerCall)
   for (int i = 1; i <= Propagator::kMaxCrossingRefinements; ++i) {
     EXPECT_NEAR(Driver::requestedSteps[i], 0.5 * Driver::requestedSteps[i - 1], 1.0e-12);
   }
+}
+
+// Chord target. Outside the geometry safety, the propagator integrates arcs kChordArcFactor times the safe length, so
+// that on a circle their chords lie 0.8 deltaChord from them.
+
+// On the circle of the recording driver, ComputeSafeLength gives 2 mm, whose chord lies deltaChord / 4 from its arc.
+// The propagator integrates arcs kChordArcFactor times longer, whose chords lie 0.8 deltaChord from them, and navigates
+// them without a retry: a 20 mm step takes six chords instead of ten.
+TEST(FieldPropagatorRungeKuttaNavigation, ArcsOutsideSafetyAimAtEightTenthsOfDeltaChord)
+{
+  using Driver     = RecordingCircularPropagatorDriver;
+  using Propagator = fieldPropagatorRungeKutta<DummyField, Driver, double, FiniteSafetyNavigator>;
+
+  // Momentum and field for which a positive track bends on the driver's circle
+  constexpr int charge               = 1;
+  const double momentumMag           = 10.0 * copcore::units::MeV;
+  vecgeom::Vector3D<double> momentum = {momentumMag, 0.0, 0.0};
+  vecgeom::Vector3D<double> field    = {0.0, 0.0, momentumMag / (std::abs(fieldConstants::kB2C) * kCircleRadius)};
+  const double safeLength            = Propagator::ComputeSafeLength(momentum, field, charge);
+  ASSERT_NEAR(safeLength, CircleSafeLength(), 1.0e-12);
+  EXPECT_NEAR(CircleChordDistanceForArc(safeLength), 0.25 * fieldConstants::deltaChord,
+              0.01 * fieldConstants::deltaChord);
+
+  const auto result = PropagateOnCircle(/*physicsStep=*/20.0, safeLength, /*cachedSafety=*/0.0,
+                                        /*refreshedSafety=*/0.0);
+
+  EXPECT_TRUE(result.propagated);
+  EXPECT_NEAR(result.moved, 20.0, 1.0e-12);
+  ASSERT_EQ(Driver::calls, 6u);
+  ASSERT_EQ(FiniteSafetyNavigator::stepCalls, 6);
+  // Five full arcs and the rest of the step
+  for (int i = 0; i < 5; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_DOUBLE_EQ(Driver::requestedSteps[i], Propagator::kChordArcFactor * safeLength);
+    EXPECT_NEAR(CircleChordDistanceForChord(FiniteSafetyNavigator::chordLengths[i]), 0.8 * fieldConstants::deltaChord,
+                0.01 * fieldConstants::deltaChord);
+  }
+}
+
+// A chord at the target meets a surface up to 0.8 deltaChord from the track, 3.2 times farther than a chord of the safe
+// length. Refined with the same kMaxCrossingRefinements, its crossings are within deltaIntersection of the track where
+// the track meets the surface within 45 degrees of its normal.
+TEST(FieldPropagatorRungeKuttaNavigation, RefinedCrossingsOfChordsAtTheTargetAreWithinDeltaIntersection)
+{
+  const double chordArc = kChordArcFactor * CircleSafeLength();
+  int crossings         = 0;
+  for (double angle : {-1.2, -0.9, -0.6, -0.3, 0.0, 0.3, 0.6, 0.9, 1.2}) {
+    SCOPED_TRACE(angle);
+    EXPECT_LE(CrossPlanesAlongFirstChords(angle, chordArc, crossings, /*minCosIncidence=*/std::sqrt(0.5)),
+              fieldConstants::deltaIntersection);
+  }
+  EXPECT_GT(crossings, 600);
+}
+
+// At more oblique crossings, kMaxCrossingRefinements can stop the refinement of such a chord's crossing first, also
+// where it does not stop it for a chord of the safe length: with 2 mm chords, every crossing of this sweep ends within
+// deltaIntersection. The crossing is then accepted on the plane, a few deltaIntersection from the track instead of up
+// to 0.8 deltaChord without refinement.
+TEST(FieldPropagatorRungeKuttaNavigation, ObliqueCrossingsOfChordsAtTheTargetStayOnThePlaneNearTheTrack)
+{
+  const double chordArc = kChordArcFactor * CircleSafeLength();
+  int crossings         = 0;
+  for (double angle : {-1.2, -0.9, -0.6, -0.3, 0.0, 0.3, 0.6, 0.9, 1.2}) {
+    SCOPED_TRACE(angle);
+    EXPECT_LE(CrossPlanesAlongFirstChords(angle, chordArc, crossings), 10.0 * fieldConstants::deltaIntersection);
+  }
+  EXPECT_GT(crossings, 1000);
 }
